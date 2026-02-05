@@ -1,13 +1,20 @@
 let capture;
 let started = false;
 
-// Stage: 'consent' | 'camera'
+// Stage: 'consent' | 'math' | 'camera'
 let stage = 'consent';
 
 // Consent UI state
 let consentChecked = false;
 let consentBox = { x: 0, y: 0, size: 0 };
 let continueBtnBox = { x: 0, y: 0, w: 0, h: 0 };
+
+// Math captcha state
+let mathProblem = { num1: 0, num2: 0, operator: '+', answer: 0 };
+let mathInput = null; // p5.Element
+let mathSubmitBtn = null; // p5.Element
+let mathMsg = ''; // feedback for wrong attempts
+let mathAttempts = 0;
 
 const gridCols = 3;
 const gridRows = 3;
@@ -21,11 +28,8 @@ const FEEDBACK_STAGE_DURATION_MS = 15000; // stage escalation every 15s
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup every 7s
 let lastFeedbackAttempt = 0; // last time we attempted to show a popup
 
-/* Popup state */
-let showPopup = false;
-let popupMessage = "";
-let popupBox = { x: 0, y: 0, w: 0, h: 0 };
-let closeBtn = { x: 0, y: 0, r: 0 }; // circle 'x' button area
+/* Popup state - now supports multiple popups in stage 4 */
+let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
 
 /* grid hit test info (updated in draw) */
 let lastGridBox = null; // { x, y, size }
@@ -34,12 +38,26 @@ let lastGridBox = null; // { x, y, size }
 let highlightedCell = -1;
 let highlightStart = 0;
 const HIGHLIGHT_DURATION = 400; // ms
-const HIGHLIGHT_COLOR = [255, 220, 0, 120]; // RGBA
+const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA 
 
 /* Visual corruption effects (start at feedback stage 2, stronger at stage 3) */
 let effectsAssigned = false;
-let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur
+let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur, 5 blackout
 let tileSeeds = []; // per-tile random seeds for animation
+
+/* Blackout squares state */
+let blackoutSquares = []; // array of indices that are blacked out
+let lastBlackoutChange = 0;
+const BLACKOUT_CHANGE_INTERVAL = 2000; // change blackout pattern every 2s in stage 4
+
+/* Auto-scramble for stage 4 */
+let lastAutoScramble = 0;
+const AUTO_SCRAMBLE_INTERVAL = 3000; // auto-scramble every 3s in stage 4
+
+/* Multiple popups for stage 4 */
+const MAX_POPUPS_STAGE_4 = 4; // maximum simultaneous popups in stage 4
+let lastPopupSpawn = 0;
+const POPUP_SPAWN_INTERVAL = 1200; // spawn new popup every 1.2s in stage 4 (faster)
 
 const BLUE = '#1a73e8';
 const WHITE = '#ffffff';
@@ -64,7 +82,10 @@ const FEEDBACK_BY_STAGE = [
   [
     "I told you to look at me. Why are you not looking at me?",
     "Your face seems weird. Why are you like that?",
-    "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚"
+    "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
+    "ERROR: VERIFICATION FAILED",
+    "SYSTEM MALFUNCTION DETECTED",
+    "Cannot process image data"
   ]
 ];
 
@@ -84,9 +105,21 @@ function draw() {
     return;
   }
 
+  if (stage === 'math') {
+    drawMathCaptchaUI();
+    lastGridBox = null;
+    return;
+  }
+
   // CAMERA stage
   let topBarH = constrain(round(height * 0.16), 80, 160);
   drawTopBar(topBarH);
+
+  // Determine current feedback stage index (for effects activation and intensity)
+  if (!feedbackStartMillis) feedbackStartMillis = millis();
+  let elapsed = millis() - feedbackStartMillis;
+  let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
+  stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
   // If camera not ready, show loading and allow popups to appear
   if (!capture || !capture.elt || !capture.elt.videoWidth || !capture.elt.videoHeight) {
@@ -95,7 +128,7 @@ function draw() {
     textAlign(CENTER, CENTER);
     textSize(20);
     text("Starting camera...", width / 2, height / 2);
-    manageFeedback(topBarH);
+    manageFeedback(topBarH, stageIndex);
     drawBottomButton();
     lastGridBox = null;
     return;
@@ -129,12 +162,6 @@ function draw() {
   buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
   buffer.pop();
 
-  // Determine current feedback stage index (for effects activation and intensity)
-  if (!feedbackStartMillis) feedbackStartMillis = millis();
-  let elapsed = millis() - feedbackStartMillis;
-  let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
-  stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
-
   // When stageIndex >= 2, enable effects assignment (once)
   if (stageIndex >= 2 && !effectsAssigned) {
     assignTileEffects();
@@ -145,12 +172,28 @@ function draw() {
     effectsAssigned = false;
     tileEffects = [];
     tileSeeds = [];
+    blackoutSquares = [];
   }
 
   // Intensity: subtle at stage 2, stronger at stage 3+
   let intensity = 0.0;
   if (stageIndex === 2) intensity = 0.45; // subtle
   if (stageIndex >= 3) intensity = 1.0; // strong
+
+  // Stage 4: auto-scramble and move blackout squares
+  if (stageIndex >= 3) {
+    // Auto-scramble grid
+    if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
+      scrambleMapping();
+      lastAutoScramble = millis();
+    }
+    
+    // Change blackout pattern
+    if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
+      updateBlackoutSquares();
+      lastBlackoutChange = millis();
+    }
+  }
 
   // Background card behind camera
   push();
@@ -170,6 +213,17 @@ function draw() {
     for (let c = 0; c < gridCols; c++) {
       let destIndex = r * gridCols + c;
       let srcIndex = mapping[destIndex];
+
+      // Check if this square is blacked out
+      if (blackoutSquares.includes(destIndex)) {
+        // Draw black square
+        let dx = c * destCellSize;
+        let dy = r * destCellSize;
+        fill(0);
+        noStroke();
+        rect(dx, dy, destCellSize, destCellSize);
+        continue; // skip rendering the actual tile
+      }
 
       // Source coordinates inside the buffer
       let srcX = (srcIndex % gridCols) * srcCellSize;
@@ -227,8 +281,8 @@ function draw() {
   // Bottom-right verifying button (animated dots)
   drawBottomButton();
 
-  // Manage feedback popups (timing and drawing)
-  manageFeedback(topBarH);
+  // Manage feedback popups (timing and drawing) - now with multiple popups in stage 4
+  manageFeedback(topBarH, stageIndex);
 }
 
 /* ------------------ CONSENT UI ------------------ */
@@ -297,7 +351,7 @@ function drawConsentUI() {
   fill(90);
   textAlign(LEFT, TOP);
   textSize(13);
-  text("Please check the box and press Continue to begin the image verification step.", x + 28, y + 120, w - 56);
+  text("Please check the box and press Continue to begin verification.", x + 28, y + 120, w - 56);
   pop();
 
   // Continue button
@@ -317,6 +371,216 @@ function drawConsentUI() {
   textSize(16);
   text(consentChecked ? "Continue" : "Continue", btnX + btnW / 2, btnY + btnH / 2);
   pop();
+}
+
+/* ------------------ MATH CAPTCHA UI ------------------ */
+function enterMathCaptcha() {
+  generateMathProblem();
+  mathMsg = '';
+  mathAttempts = 0;
+
+  if (!mathInput) {
+    mathInput = createInput('');
+    mathInput.attribute('placeholder', 'Enter answer');
+    mathInput.attribute('type', 'number');
+    mathInput.style('font-size', '16px');
+    mathInput.style('padding', '12px');
+    mathInput.style('border', '2px solid #ccc');
+    mathInput.style('border-radius', '4px');
+    mathInput.style('background', '#fff');
+    mathInput.style('z-index', '1000');
+    mathInput.style('position', 'absolute');
+    mathInput.style('touch-action', 'manipulation');
+    mathInput.style('pointer-events', 'auto');
+    mathInput.style('-webkit-appearance', 'none');
+    mathInput.style('box-sizing', 'border-box');
+    mathInput.elt.autocomplete = 'off';
+  }
+  if (!mathSubmitBtn) {
+    mathSubmitBtn = createButton('Submit');
+    mathSubmitBtn.mousePressed(handleMathSubmit);
+    mathSubmitBtn.touchStarted(handleMathSubmit);
+    mathSubmitBtn.style('background-color', BLUE);
+    mathSubmitBtn.style('color', '#ffffff');
+    mathSubmitBtn.style('border', 'none');
+    mathSubmitBtn.style('padding', '12px 20px');
+    mathSubmitBtn.style('border-radius', '4px');
+    mathSubmitBtn.style('font-size', '16px');
+    mathSubmitBtn.style('font-weight', 'bold');
+    mathSubmitBtn.style('cursor', 'pointer');
+    mathSubmitBtn.style('z-index', '1000');
+    mathSubmitBtn.style('position', 'absolute');
+    mathSubmitBtn.style('touch-action', 'manipulation');
+    mathSubmitBtn.style('pointer-events', 'auto');
+    mathSubmitBtn.style('-webkit-tap-highlight-color', 'transparent');
+    mathSubmitBtn.style('height', '44px');
+    mathSubmitBtn.style('box-sizing', 'border-box');
+  }
+  positionMathElements();
+  mathInput.elt.value = '';
+  
+  setTimeout(() => {
+    if (mathInput && mathInput.elt) {
+      mathInput.elt.focus();
+    }
+  }, 300);
+}
+
+function generateMathProblem() {
+  let operators = ['+', '-', '×'];
+  mathProblem.operator = random(operators);
+  
+  if (mathProblem.operator === '+') {
+    mathProblem.num1 = floor(random(1, 20));
+    mathProblem.num2 = floor(random(1, 20));
+    mathProblem.answer = mathProblem.num1 + mathProblem.num2;
+  } else if (mathProblem.operator === '-') {
+    mathProblem.num1 = floor(random(10, 30));
+    mathProblem.num2 = floor(random(1, mathProblem.num1));
+    mathProblem.answer = mathProblem.num1 - mathProblem.num2;
+  } else { // multiplication
+    mathProblem.num1 = floor(random(2, 12));
+    mathProblem.num2 = floor(random(2, 12));
+    mathProblem.answer = mathProblem.num1 * mathProblem.num2;
+  }
+}
+
+function positionMathElements() {
+  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
+  const h = constrain(round(min(height * 0.36, 280)), 200, 320);
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+
+  const elementHeight = 44;
+  const bottomMargin = 24;
+  const gap = 12;
+  const buttonWidth = 100;
+  const inputWidth = w - buttonWidth - gap - 40;
+
+  if (mathInput) {
+    mathInput.position(x + 20, y + h - bottomMargin - elementHeight);
+    mathInput.size(inputWidth, elementHeight);
+    mathInput.show();
+  }
+  if (mathSubmitBtn) {
+    mathSubmitBtn.position(x + 20 + inputWidth + gap, y + h - bottomMargin - elementHeight);
+    mathSubmitBtn.show();
+  }
+}
+
+function removeMathElements() {
+  if (mathInput) {
+    mathInput.remove();
+    mathInput = null;
+  }
+  if (mathSubmitBtn) {
+    mathSubmitBtn.remove();
+    mathSubmitBtn = null;
+  }
+}
+
+function drawMathCaptchaUI() {
+  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
+  const h = constrain(round(min(height * 0.36, 280)), 200, 320);
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+
+  // Card
+  push();
+  fill(WHITE);
+  stroke(200);
+  rect(x, y, w, h, 8);
+  pop();
+
+  // Title
+  push();
+  noStroke();
+  fill(0);
+  textAlign(CENTER, CENTER);
+  textSize(18);
+  textStyle(BOLD);
+  text("Math Verification", x + w / 2, y + 28);
+  textStyle(NORMAL);
+  pop();
+
+  // Math problem display
+  push();
+  noStroke();
+  fill(245);
+  rect(x + 20, y + 60, w - 40, 80, 6);
+  
+  fill(0);
+  textAlign(CENTER, CENTER);
+  textSize(32);
+  textStyle(BOLD);
+  let problemText = mathProblem.num1 + ' ' + mathProblem.operator + ' ' + mathProblem.num2 + ' = ?';
+  text(problemText, x + w / 2, y + 100);
+  textStyle(NORMAL);
+  pop();
+
+  // Instructions
+  push();
+  noStroke();
+  fill(60);
+  textAlign(LEFT, TOP);
+  textSize(13);
+  text("Solve the math problem above and enter your answer below.", x + 20, y + 160);
+  
+  if (mathMsg) {
+    fill(180, 30, 30);
+    text(mathMsg, x + 20, y + 180);
+  }
+  pop();
+
+  // Ensure DOM elements exist & positioned
+  if (!mathInput || !mathSubmitBtn) {
+    enterMathCaptcha();
+  } else {
+    positionMathElements();
+  }
+}
+
+function handleMathSubmit() {
+  if (!mathInput) return false;
+  
+  let val = mathInput.elt.value.trim();
+  let userAnswer = parseInt(val);
+  
+  if (isNaN(userAnswer)) {
+    mathMsg = "Please enter a valid number.";
+    mathInput.elt.value = '';
+    mathInput.elt.focus();
+    return false;
+  }
+  
+  if (userAnswer === mathProblem.answer) {
+    // Correct answer -> move to camera verification
+    removeMathElements();
+    mathMsg = '';
+    stage = 'camera';
+    started = true;
+    capture = createCapture({ audio: false, video: { facingMode: "user" } });
+    capture.hide();
+    // initialize feedback timers
+    feedbackStartMillis = millis();
+    lastFeedbackAttempt = millis();
+    popups = [];
+    lastAutoScramble = millis();
+    lastBlackoutChange = millis();
+    lastPopupSpawn = millis();
+  } else {
+    mathAttempts++;
+    mathMsg = "Incorrect answer. Try again.";
+    // Generate new problem after wrong attempt
+    generateMathProblem();
+    mathInput.elt.value = '';
+    setTimeout(() => {
+      if (mathInput && mathInput.elt) {
+        mathInput.elt.focus();
+      }
+    }, 100);
+  }
+  return false;
 }
 
 /* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
@@ -348,48 +612,71 @@ function drawTopBar(topBarH) {
   text('If there are any, continue', xText, topPadding + lineHeight * 2.5);
 }
 
-function manageFeedback(topBarH) {
+function manageFeedback(topBarH, stageIndex) {
   if (!feedbackStartMillis) feedbackStartMillis = millis();
-  let elapsed = millis() - feedbackStartMillis;
-  let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
-  stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
-  if (!showPopup && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
-    let pool = FEEDBACK_BY_STAGE[stageIndex];
-    popupMessage = pool[floor(random(pool.length))];
-    createPopup(popupMessage);
-    showPopup = true;
-    lastFeedbackAttempt = millis();
+  // Stage 4: spawn multiple popups aggressively
+  if (stageIndex >= 3) {
+    // Spawn new popups periodically until we hit max
+    if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_4) {
+      let pool = FEEDBACK_BY_STAGE[stageIndex];
+      let message = pool[floor(random(pool.length))];
+      createAndAddPopup(message, topBarH, true); // true = random position
+      lastPopupSpawn = millis();
+    }
+  } else {
+    // Stages 0-2: single popup behavior (original)
+    if (popups.length === 0 && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
+      let pool = FEEDBACK_BY_STAGE[stageIndex];
+      let message = pool[floor(random(pool.length))];
+      createAndAddPopup(message, topBarH, false); // false = centered
+      lastFeedbackAttempt = millis();
+    }
   }
 
-  if (showPopup) drawPopup(); // draw popup on top
+  // Draw all popups
+  for (let i = 0; i < popups.length; i++) {
+    drawPopup(popups[i]);
+  }
 }
 
-function createPopup(message) {
+function createAndAddPopup(message, topBarH, randomPosition) {
   const maxW = min(width * 0.9, 520);
-  const w = constrain(round(maxW), 320, maxW);
+  const w = constrain(round(maxW), 280, maxW);
   const h = constrain(round(height * 0.16), 100, 220);
 
-  // center on captcha grid if available, else center canvas
+  // Position logic
   let x, y;
-  if (lastGridBox && lastGridBox.size > 0) {
-    x = lastGridBox.x + (lastGridBox.size - w) / 2;
-    y = lastGridBox.y + (lastGridBox.size - h) / 2;
+  if (randomPosition) {
+    // Stage 4: random scattered positions with padding
+    x = random(10, max(10, width - w - 10));
+    y = random(topBarH + 10, max(topBarH + 10, height - h - 70));
   } else {
-    x = (width - w) / 2;
-    y = (height - h) / 2;
+    // First popup or stages 0-2: center on grid
+    if (lastGridBox && lastGridBox.size > 0) {
+      x = lastGridBox.x + (lastGridBox.size - w) / 2;
+      y = lastGridBox.y + (lastGridBox.size - h) / 2;
+    } else {
+      x = (width - w) / 2;
+      y = (height - h) / 2;
+    }
   }
 
-  popupBox = { x, y, w, h };
+  let popupBox = { x, y, w, h };
   let cbR = 14;
   let cbX = x + w - cbR - 12;
   let cbY = y + cbR + 8;
-  closeBtn = { x: cbX, y: cbY, r: cbR };
-  popupMessage = message;
+  let closeBtn = { x: cbX, y: cbY, r: cbR };
+
+  popups.push({
+    message: message,
+    box: popupBox,
+    closeBtn: closeBtn
+  });
 }
 
-function drawPopup() {
-  const { x, y, w, h } = popupBox;
+function drawPopup(popup) {
+  const { x, y, w, h } = popup.box;
 
   // popup background (NO shadow)
   push();
@@ -430,11 +717,11 @@ function drawPopup() {
   // close button
   push();
   fill(230);
-  circle(closeBtn.x, closeBtn.y, closeBtn.r * 2);
+  circle(popup.closeBtn.x, popup.closeBtn.y, popup.closeBtn.r * 2);
   stroke(120);
   strokeWeight(2);
-  line(closeBtn.x - 6, closeBtn.y - 6, closeBtn.x + 6, closeBtn.y + 6);
-  line(closeBtn.x - 6, closeBtn.y + 6, closeBtn.x + 6, closeBtn.y - 6);
+  line(popup.closeBtn.x - 6, popup.closeBtn.y - 6, popup.closeBtn.x + 6, popup.closeBtn.y + 6);
+  line(popup.closeBtn.x - 6, popup.closeBtn.y + 6, popup.closeBtn.x + 6, popup.closeBtn.y - 6);
   noStroke();
   pop();
 
@@ -450,7 +737,7 @@ function drawPopup() {
   let msgX = x + pad;
   let msgY = y + chromeH + pad / 2;
   let msgW = w - pad * 2;
-  text(popupMessage, msgX, msgY, msgW, h - chromeH - pad);
+  text(popup.message, msgX, msgY, msgW, h - chromeH - pad);
   textStyle(NORMAL);
   pop();
 }
@@ -512,35 +799,42 @@ function handlePointer(px, py) {
     if (continueBtnBox && px >= continueBtnBox.x && px <= continueBtnBox.x + continueBtnBox.w &&
         py >= continueBtnBox.y && py <= continueBtnBox.y + continueBtnBox.h) {
       if (consentChecked) {
-        // Go directly to camera stage (skip text verification)
-        stage = 'camera';
-        started = true;
-        capture = createCapture({ audio: false, video: { facingMode: "user" } });
-        capture.hide();
-        // initialize feedback timers
-        feedbackStartMillis = millis();
-        lastFeedbackAttempt = millis();
-        showPopup = false;
-        popupMessage = "";
+        // Move to math captcha stage
+        stage = 'math';
+        enterMathCaptcha();
       }
       return false;
     }
     return false;
   }
 
+  // MATH stage interactions: DOM input handles it
+  if (stage === 'math') {
+    return false;
+  }
+
   // CAMERA stage interactions
   if (stage === 'camera') {
-    // If popup visible, check close button first
-    if (showPopup) {
-      let dx = px - closeBtn.x;
-      let dy = py - closeBtn.y;
-      if (dx * dx + dy * dy <= closeBtn.r * closeBtn.r) {
-        showPopup = false;
-        popupMessage = "";
+    // Check if clicking any popup close buttons (check in reverse order - top popup first)
+    for (let i = popups.length - 1; i >= 0; i--) {
+      let popup = popups[i];
+      let dx = px - popup.closeBtn.x;
+      let dy = py - popup.closeBtn.y;
+      if (dx * dx + dy * dy <= popup.closeBtn.r * popup.closeBtn.r) {
+        // Close this popup
+        popups.splice(i, 1);
         lastFeedbackAttempt = millis();
         return false;
       }
-      // allow grid interaction even with popup
+    }
+
+    // If clicked on any popup area (not close button), consume the click
+    for (let i = popups.length - 1; i >= 0; i--) {
+      let popup = popups[i];
+      if (px >= popup.box.x && px <= popup.box.x + popup.box.w &&
+          py >= popup.box.y && py <= popup.box.y + popup.box.h) {
+        return false; // click consumed by popup
+      }
     }
 
     // grid tap to scramble and highlight specific cell
@@ -594,16 +888,38 @@ function arraysEqual(a, b) {
   return true;
 }
 
+/* ------------------ BLACKOUT SQUARES ------------------ */
+function updateBlackoutSquares() {
+  // Pick 1-3 random squares to black out
+  let count = floor(random(1, 4)); // 1, 2, or 3 squares
+  blackoutSquares = [];
+  let available = [];
+  for (let i = 0; i < gridCols * gridRows; i++) {
+    available.push(i);
+  }
+  
+  // Shuffle and pick
+  for (let i = 0; i < count; i++) {
+    if (available.length === 0) break;
+    let idx = floor(random(available.length));
+    blackoutSquares.push(available[idx]);
+    available.splice(idx, 1);
+  }
+}
+
 /* ------------------ EFFECTS ASSIGNMENT & APPLICATION ------------------ */
 function assignTileEffects() {
   tileEffects = [];
   tileSeeds = [];
   for (let i = 0; i < gridCols * gridRows; i++) {
-    // pick one of the four effects to ensure variety
-    let pick = floor(random(1, 5)); // 1..4
+    // pick one of the four effects to ensure variety (not including blackout in initial assignment)
+    let pick = floor(random(1, 5)); // 1..4 (scanlines, noise, pixelate, blur)
     tileEffects.push(pick);
     tileSeeds.push(random(1000));
   }
+  
+  // Initialize blackout squares (start with some in stage 2+)
+  updateBlackoutSquares();
 }
 
 // apply effect to a tile image then draw into destination rect (dx,dy,w,h)
@@ -689,7 +1005,7 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     g.image(tileImg, 0, 0, pW, pH);
     // blur radius range
     let radius = lerp(1.0, 6.0, intensity);
-    // p5's filter(BLUR, r) accepts small r values; we can call multiple times if stronger needed
+    // p5's filter(BLUR, r) accepts small r values
     g.filter(BLUR, radius);
     image(g, dx, dy, w, h);
     g.remove();
@@ -703,4 +1019,5 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
 /* ------------------ MISC ------------------ */
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  if (mathInput || mathSubmitBtn) positionMathElements();
 }
