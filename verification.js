@@ -1,23 +1,13 @@
 let capture;
 let started = false;
 
-// Stage: 'consent' | 'text' | 'camera'
+// Stage: 'consent' | 'camera'
 let stage = 'consent';
 
 // Consent UI state
 let consentChecked = false;
 let consentBox = { x: 0, y: 0, size: 0 };
 let continueBtnBox = { x: 0, y: 0, w: 0, h: 0 };
-
-// Text captcha state
-let captchaText = '';
-let captchaInput = null; // p5.Element
-let captchaSubmitBtn = null; // p5.Element
-let captchaMsg = ''; // feedback for wrong attempts
-const CAPTCHA_WORDS = [
-  'human', 'verify', 'canvas', 'puzzle', 'mirror', 'still', 'looking',
-  'coffee', 'window', 'pixel', 'noise', 'please', 'hello', 'blur'
-];
 
 const gridCols = 3;
 const gridRows = 3;
@@ -90,12 +80,6 @@ function draw() {
 
   if (stage === 'consent') {
     drawConsentUI();
-    lastGridBox = null;
-    return;
-  }
-
-  if (stage === 'text') {
-    drawTextCaptchaUI();
     lastGridBox = null;
     return;
   }
@@ -335,216 +319,6 @@ function drawConsentUI() {
   pop();
 }
 
-/* ------------------ TEXT CAPTCHA UI ------------------ */
-function enterTextCaptcha() {
-  captchaText = random(CAPTCHA_WORDS);
-  captchaMsg = '';
-
-  if (!captchaInput) {
-    captchaInput = createInput('');
-    captchaInput.attribute('placeholder', 'Type the text shown above');
-    captchaInput.attribute('type', 'text');
-    captchaInput.style('font-size', '16px');
-    captchaInput.style('padding', '12px');
-    captchaInput.style('border', '2px solid #ccc');
-    captchaInput.style('border-radius', '4px');
-    captchaInput.style('background', '#fff');
-    captchaInput.style('z-index', '1000');
-    captchaInput.style('position', 'absolute');
-    captchaInput.style('touch-action', 'manipulation');
-    captchaInput.style('pointer-events', 'auto');
-    captchaInput.style('-webkit-appearance', 'none');
-    captchaInput.elt.autocapitalize = 'none';
-    captchaInput.elt.autocomplete = 'off';
-    captchaInput.elt.autocorrect = 'off';
-  }
-  if (!captchaSubmitBtn) {
-    captchaSubmitBtn = createButton('Submit');
-    captchaSubmitBtn.mousePressed(handleCaptchaSubmit);
-    captchaSubmitBtn.touchStarted(handleCaptchaSubmit); // Add touch handler
-    captchaSubmitBtn.style('background-color', BLUE);
-    captchaSubmitBtn.style('color', '#ffffff');
-    captchaSubmitBtn.style('border', 'none');
-    captchaSubmitBtn.style('padding', '12px 20px');
-    captchaSubmitBtn.style('border-radius', '6px');
-    captchaSubmitBtn.style('font-size', '16px');
-    captchaSubmitBtn.style('font-weight', 'bold');
-    captchaSubmitBtn.style('cursor', 'pointer');
-    captchaSubmitBtn.style('z-index', '1000');
-    captchaSubmitBtn.style('position', 'absolute');
-    captchaSubmitBtn.style('touch-action', 'manipulation');
-    captchaSubmitBtn.style('pointer-events', 'auto');
-    captchaSubmitBtn.style('-webkit-tap-highlight-color', 'transparent');
-  }
-  positionCaptchaElements();
-  captchaInput.elt.value = '';
-  
-  // Focus with delay for mobile
-  setTimeout(() => {
-    if (captchaInput && captchaInput.elt) {
-      captchaInput.elt.focus();
-    }
-  }, 300);
-}
-
-function positionCaptchaElements() {
-  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
-  const h = constrain(round(min(height * 0.32, 240)), 140, 320);
-  const x = (width - w) / 2;
-  const y = (height - h) / 2;
-
-  if (captchaInput) {
-    let inputW = w - 170;
-    captchaInput.position(x + 20, y + h - 70);
-    captchaInput.size(inputW, 40);
-    captchaInput.show();
-  }
-  if (captchaSubmitBtn) {
-    captchaSubmitBtn.position(x + w - 130, y + h - 75);
-    captchaSubmitBtn.show();
-  }
-}
-
-function removeCaptchaElements() {
-  if (captchaInput) {
-    captchaInput.remove();
-    captchaInput = null;
-  }
-  if (captchaSubmitBtn) {
-    captchaSubmitBtn.remove();
-    captchaSubmitBtn = null;
-  }
-}
-
-function drawTextCaptchaUI() {
-  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
-  const h = constrain(round(min(height * 0.32, 240)), 140, 320);
-  const x = (width - w) / 2;
-  const y = (height - h) / 2;
-
-  // Card
-  push();
-  fill(WHITE);
-  stroke(200);
-  rect(x, y, w, h, 8);
-  pop();
-
-  // Title
-  push();
-  noStroke();
-  fill(0);
-  textAlign(CENTER, CENTER);
-  textSize(18);
-  textStyle(BOLD);
-  text("Text Verification", x + w / 2, y + 28);
-  textStyle(NORMAL);
-  pop();
-
-  // Render captcha text
-  push();
-  translate(x + w / 2, y + h / 2 - 10);
-  fill(245);
-  noStroke();
-  rect(-w / 2 + 20, -32, w - 40, 64, 6);
-
-  let rot = sin(millis() * 0.001 + hashCode(captchaText)) * 0.06;
-  rotate(rot);
-
-  noStroke();
-  fill(30);
-  textAlign(CENTER, CENTER);
-  textSize(constrain(28 + captchaText.length * 2, 26, 44));
-  textStyle(BOLD);
-  let displayText = jitterText(captchaText);
-  text(displayText, 0, 0);
-  pop();
-
-  // noise lines
-  push();
-  stroke(180);
-  strokeWeight(1);
-  for (let i = 0; i < 6; i++) {
-    let lx1 = random(x + 24, x + w - 24);
-    let ly1 = random(y + 48, y + h - 48);
-    let lx2 = lx1 + random(-60, 60);
-    let ly2 = ly1 + random(-20, 20);
-    line(lx1, ly1, lx2, ly2);
-  }
-  pop();
-
-  // prompt and feedback
-  push();
-  noStroke();
-  fill(60);
-  textAlign(LEFT, TOP);
-  textSize(13);
-  text("Type the characters you see above and press Submit.", x + 20, y + h - 96);
-  if (captchaMsg) {
-    fill(180, 30, 30);
-    text(captchaMsg, x + 20, y + h - 48);
-  }
-  pop();
-
-  if (!captchaInput || !captchaSubmitBtn) {
-    enterTextCaptcha();
-  } else {
-    positionCaptchaElements();
-  }
-}
-
-/* Slightly scramble text visually for captcha */
-function jitterText(s) {
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    let ch = s.charAt(i);
-    if (random() < 0.3) ch = ch.toUpperCase();
-    if (random() < 0.2) out += ' ';
-    out += ch;
-  }
-  return out;
-}
-
-function hashCode(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
-  }
-  return h;
-}
-
-function handleCaptchaSubmit() {
-  if (!captchaInput) return false;
-  
-  let val = captchaInput.elt.value.trim();
-  if (val.toLowerCase() === captchaText.toLowerCase()) {
-    // Passed text captcha -> move to camera verification
-    removeCaptchaElements();
-    captchaMsg = '';
-    stage = 'camera';
-    // start camera
-    started = true;
-    capture = createCapture({ audio: false, video: { facingMode: "user" } });
-    capture.hide();
-    // initialize feedback timers
-    feedbackStartMillis = millis();
-    lastFeedbackAttempt = millis();
-    showPopup = false;
-    popupMessage = "";
-  } else {
-    captchaMsg = "Text did not match. Try again.";
-    captchaText = random(CAPTCHA_WORDS);
-    captchaInput.elt.value = '';
-    // Refocus on mobile
-    setTimeout(() => {
-      if (captchaInput && captchaInput.elt) {
-        captchaInput.elt.focus();
-      }
-    }, 100);
-  }
-  return false; // prevent default
-}
-
 /* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
 
 function drawTopBar(topBarH) {
@@ -738,16 +512,19 @@ function handlePointer(px, py) {
     if (continueBtnBox && px >= continueBtnBox.x && px <= continueBtnBox.x + continueBtnBox.w &&
         py >= continueBtnBox.y && py <= continueBtnBox.y + continueBtnBox.h) {
       if (consentChecked) {
-        stage = 'text';
-        enterTextCaptcha();
+        // Go directly to camera stage (skip text verification)
+        stage = 'camera';
+        started = true;
+        capture = createCapture({ audio: false, video: { facingMode: "user" } });
+        capture.hide();
+        // initialize feedback timers
+        feedbackStartMillis = millis();
+        lastFeedbackAttempt = millis();
+        showPopup = false;
+        popupMessage = "";
       }
       return false;
     }
-    return false;
-  }
-
-  // TEXT stage interactions: DOM input handles it
-  if (stage === 'text') {
     return false;
   }
 
@@ -926,5 +703,4 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
 /* ------------------ MISC ------------------ */
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  if (captchaInput || captchaSubmitBtn) positionCaptchaElements();
 }
