@@ -74,7 +74,7 @@ const FEEDBACK_BY_STAGE = [
   [
     "I told you to look at me. Why are you not looking at me?",
     "Your face seems weird. Why are you like that?",
-    "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚"
+    "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚"
   ]
 ];
 
@@ -343,24 +343,48 @@ function enterTextCaptcha() {
   if (!captchaInput) {
     captchaInput = createInput('');
     captchaInput.attribute('placeholder', 'Type the text shown above');
+    captchaInput.attribute('type', 'text');
     captchaInput.style('font-size', '16px');
-    captchaInput.style('padding', '8px');
+    captchaInput.style('padding', '12px');
+    captchaInput.style('border', '2px solid #ccc');
+    captchaInput.style('border-radius', '4px');
+    captchaInput.style('background', '#fff');
+    captchaInput.style('z-index', '1000');
+    captchaInput.style('position', 'absolute');
+    captchaInput.style('touch-action', 'manipulation');
+    captchaInput.style('pointer-events', 'auto');
+    captchaInput.style('-webkit-appearance', 'none');
     captchaInput.elt.autocapitalize = 'none';
     captchaInput.elt.autocomplete = 'off';
+    captchaInput.elt.autocorrect = 'off';
   }
   if (!captchaSubmitBtn) {
     captchaSubmitBtn = createButton('Submit');
     captchaSubmitBtn.mousePressed(handleCaptchaSubmit);
+    captchaSubmitBtn.touchStarted(handleCaptchaSubmit); // Add touch handler
     captchaSubmitBtn.style('background-color', BLUE);
     captchaSubmitBtn.style('color', '#ffffff');
     captchaSubmitBtn.style('border', 'none');
-    captchaSubmitBtn.style('padding', '8px 12px');
+    captchaSubmitBtn.style('padding', '12px 20px');
     captchaSubmitBtn.style('border-radius', '6px');
     captchaSubmitBtn.style('font-size', '16px');
+    captchaSubmitBtn.style('font-weight', 'bold');
+    captchaSubmitBtn.style('cursor', 'pointer');
+    captchaSubmitBtn.style('z-index', '1000');
+    captchaSubmitBtn.style('position', 'absolute');
+    captchaSubmitBtn.style('touch-action', 'manipulation');
+    captchaSubmitBtn.style('pointer-events', 'auto');
+    captchaSubmitBtn.style('-webkit-tap-highlight-color', 'transparent');
   }
   positionCaptchaElements();
   captchaInput.elt.value = '';
-  captchaInput.focus();
+  
+  // Focus with delay for mobile
+  setTimeout(() => {
+    if (captchaInput && captchaInput.elt) {
+      captchaInput.elt.focus();
+    }
+  }, 300);
 }
 
 function positionCaptchaElements() {
@@ -370,11 +394,14 @@ function positionCaptchaElements() {
   const y = (height - h) / 2;
 
   if (captchaInput) {
-    captchaInput.position(x + 20, y + h - 64);
-    captchaInput.size(w - 160, 32);
+    let inputW = w - 170;
+    captchaInput.position(x + 20, y + h - 70);
+    captchaInput.size(inputW, 40);
+    captchaInput.show();
   }
   if (captchaSubmitBtn) {
-    captchaSubmitBtn.position(x + w - 120, y + h - 68);
+    captchaSubmitBtn.position(x + w - 130, y + h - 75);
+    captchaSubmitBtn.show();
   }
 }
 
@@ -487,7 +514,8 @@ function hashCode(str) {
 }
 
 function handleCaptchaSubmit() {
-  if (!captchaInput) return;
+  if (!captchaInput) return false;
+  
   let val = captchaInput.elt.value.trim();
   if (val.toLowerCase() === captchaText.toLowerCase()) {
     // Passed text captcha -> move to camera verification
@@ -507,8 +535,14 @@ function handleCaptchaSubmit() {
     captchaMsg = "Text did not match. Try again.";
     captchaText = random(CAPTCHA_WORDS);
     captchaInput.elt.value = '';
-    captchaInput.elt.focus();
+    // Refocus on mobile
+    setTimeout(() => {
+      if (captchaInput && captchaInput.elt) {
+        captchaInput.elt.focus();
+      }
+    }, 100);
   }
+  return false; // prevent default
 }
 
 /* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
