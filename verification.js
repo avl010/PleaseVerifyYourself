@@ -24,12 +24,19 @@ let buffer = null;
 
 /* feedback timing & content */
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 15000; // stage escalation every 15s
+const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation every 20s (increased from 15s)
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup every 7s
 let lastFeedbackAttempt = 0; // last time we attempted to show a popup
+let userInteracted = false; // track if user has clicked on grid
 
-/* Popup state - now supports multiple popups in stage 4 */
+/* Popup state - now supports multiple popups in stage 6 */
 let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
+
+/* Verify button state */
+let verifyButtonClicks = 0;
+let verifyButtonMessage = 'verifying';
+let verifyButtonMessageTime = 0;
+const VERIFY_BUTTON_MESSAGE_DURATION = 2000; // 2 seconds
 
 /* grid hit test info (updated in draw) */
 let lastGridBox = null; // { x, y, size }
@@ -40,7 +47,7 @@ let highlightStart = 0;
 const HIGHLIGHT_DURATION = 400; // ms
 const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA 
 
-/* Visual corruption effects (start at feedback stage 2, stronger at stage 3) */
+/* Visual corruption effects (start at feedback stage 3, stronger at stage 4+) */
 let effectsAssigned = false;
 let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur, 5 blackout
 let tileSeeds = []; // per-tile random seeds for animation
@@ -48,16 +55,16 @@ let tileSeeds = []; // per-tile random seeds for animation
 /* Blackout squares state */
 let blackoutSquares = []; // array of indices that are blacked out
 let lastBlackoutChange = 0;
-const BLACKOUT_CHANGE_INTERVAL = 2000; // change blackout pattern every 2s in stage 4
+const BLACKOUT_CHANGE_INTERVAL = 2000; // change blackout pattern every 2s in stage 5+
 
-/* Auto-scramble for stage 4 */
+/* Auto-scramble for stage 5+ */
 let lastAutoScramble = 0;
-const AUTO_SCRAMBLE_INTERVAL = 3000; // auto-scramble every 3s in stage 4
+const AUTO_SCRAMBLE_INTERVAL = 3000; // auto-scramble every 3s in stage 5+
 
-/* Multiple popups for stage 4 */
-const MAX_POPUPS_STAGE_4 = 4; // maximum simultaneous popups in stage 4
+/* Multiple popups for stage 6 */
+const MAX_POPUPS_STAGE_6 = 4; // maximum simultaneous popups in stage 6
 let lastPopupSpawn = 0;
-const POPUP_SPAWN_INTERVAL = 1200; // spawn new popup every 1.2s in stage 4 (faster)
+const POPUP_SPAWN_INTERVAL = 1200; // spawn new popup every 1.2s in stage 6
 
 const BLUE = '#1a73e8';
 const WHITE = '#ffffff';
@@ -70,6 +77,11 @@ const FEEDBACK_BY_STAGE = [
     "Hold still for a moment."
   ],
   [
+    "Ensure proper lighting for verification.",
+    "Center your face in the frame.",
+    "Remove any obstructions."
+  ],
+  [
     "Face is unclear. Move towards better lighting.",
     "You're too far away, move closer to the camera.",
     "Fix your posture."
@@ -78,6 +90,11 @@ const FEEDBACK_BY_STAGE = [
     "Is something wrong with your face?",
     "I can't seem to verify you. Look straight at me.",
     "Try smiling."
+  ],
+  [
+    "Why can't I see you clearly?",
+    "Your face keeps changing.",
+    "Stop moving around."
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
@@ -121,14 +138,17 @@ function draw() {
   let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
   stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
-  // If camera not ready, show loading and allow popups to appear
+  // If camera not ready, show loading
   if (!capture || !capture.elt || !capture.elt.videoWidth || !capture.elt.videoHeight) {
     fill(0);
     noStroke();
     textAlign(CENTER, CENTER);
     textSize(20);
     text("Starting camera...", width / 2, height / 2);
-    manageFeedback(topBarH, stageIndex);
+    // Only show popups if user has interacted
+    if (userInteracted) {
+      manageFeedback(topBarH, stageIndex);
+    }
     drawBottomButton();
     lastGridBox = null;
     return;
@@ -162,26 +182,27 @@ function draw() {
   buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
   buffer.pop();
 
-  // When stageIndex >= 2, enable effects assignment (once)
-  if (stageIndex >= 2 && !effectsAssigned) {
+  // When stageIndex >= 3, enable effects assignment (once) - delayed from stage 2
+  if (stageIndex >= 3 && !effectsAssigned) {
     assignTileEffects();
     effectsAssigned = true;
   }
-  // If stage has dropped below 2 clear effects (unlikely)
-  if (stageIndex < 2 && effectsAssigned) {
+  // If stage has dropped below 3 clear effects (unlikely)
+  if (stageIndex < 3 && effectsAssigned) {
     effectsAssigned = false;
     tileEffects = [];
     tileSeeds = [];
     blackoutSquares = [];
   }
 
-  // Intensity: subtle at stage 2, stronger at stage 3+
+  // Intensity: subtle at stage 3-4, stronger at stage 5+
   let intensity = 0.0;
-  if (stageIndex === 2) intensity = 0.45; // subtle
-  if (stageIndex >= 3) intensity = 1.0; // strong
+  if (stageIndex === 3) intensity = 0.3; // very subtle
+  if (stageIndex === 4) intensity = 0.6; // medium
+  if (stageIndex >= 5) intensity = 1.0; // strong
 
-  // Stage 4: auto-scramble and move blackout squares
-  if (stageIndex >= 3) {
+  // Stage 5+: auto-scramble and move blackout squares
+  if (stageIndex >= 4) {
     // Auto-scramble grid
     if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
       scrambleMapping();
@@ -258,7 +279,7 @@ function draw() {
       fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
       rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
       // optional thicker stroke border
-      stroke(255, 204, 0);
+      stroke(212, 246, 255);
       strokeWeight(3);
       noFill();
       rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
@@ -281,8 +302,10 @@ function draw() {
   // Bottom-right verifying button (animated dots)
   drawBottomButton();
 
-  // Manage feedback popups (timing and drawing) - now with multiple popups in stage 4
-  manageFeedback(topBarH, stageIndex);
+  // Manage feedback popups (timing and drawing) - only if user has interacted
+  if (userInteracted) {
+    manageFeedback(topBarH, stageIndex);
+  }
 }
 
 /* ------------------ CONSENT UI ------------------ */
@@ -568,6 +591,7 @@ function handleMathSubmit() {
     lastAutoScramble = millis();
     lastBlackoutChange = millis();
     lastPopupSpawn = millis();
+    userInteracted = false; // Reset interaction flag
   } else {
     mathAttempts++;
     mathMsg = "Incorrect answer. Try again.";
@@ -615,17 +639,17 @@ function drawTopBar(topBarH) {
 function manageFeedback(topBarH, stageIndex) {
   if (!feedbackStartMillis) feedbackStartMillis = millis();
 
-  // Stage 4: spawn multiple popups aggressively
-  if (stageIndex >= 3) {
+  // Stage 6: spawn multiple popups aggressively
+  if (stageIndex >= 5) {
     // Spawn new popups periodically until we hit max
-    if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_4) {
+    if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_6) {
       let pool = FEEDBACK_BY_STAGE[stageIndex];
       let message = pool[floor(random(pool.length))];
       createAndAddPopup(message, topBarH, true); // true = random position
       lastPopupSpawn = millis();
     }
   } else {
-    // Stages 0-2: single popup behavior (original)
+    // Stages 0-4: single popup behavior (original)
     if (popups.length === 0 && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
       let pool = FEEDBACK_BY_STAGE[stageIndex];
       let message = pool[floor(random(pool.length))];
@@ -648,11 +672,11 @@ function createAndAddPopup(message, topBarH, randomPosition) {
   // Position logic
   let x, y;
   if (randomPosition) {
-    // Stage 4: random scattered positions with padding
+    // Stage 6: random scattered positions with padding
     x = random(10, max(10, width - w - 10));
     y = random(topBarH + 10, max(topBarH + 10, height - h - 70));
   } else {
-    // First popup or stages 0-2: center on grid
+    // First popup or stages 0-4: center on grid
     if (lastGridBox && lastGridBox.size > 0) {
       x = lastGridBox.x + (lastGridBox.size - w) / 2;
       y = lastGridBox.y + (lastGridBox.size - h) / 2;
@@ -742,7 +766,7 @@ function drawPopup(popup) {
   pop();
 }
 
-/* Draw bottom button with animated dots */
+/* Draw bottom button with animated dots and click response */
 function drawBottomButton() {
   let btnW = constrain(round(width * 0.28), 120, 260);
   let btnH = 46;
@@ -761,10 +785,22 @@ function drawBottomButton() {
   noStroke();
   rect(x, y, btnW, btnH, 8);
 
-  // animated dots for "verifying..."
-  let dotCount = ((floor(millis() / 500) % 3) + 1); // 1..3
-  let dots = '.'.repeat(dotCount);
-  let label = 'verifying' + dots;
+  // Determine what text to show
+  let label = '';
+  let currentTime = millis();
+  
+  // If we're showing a custom message (after button click)
+  if (verifyButtonMessage !== 'verifying' && currentTime - verifyButtonMessageTime < VERIFY_BUTTON_MESSAGE_DURATION) {
+    label = verifyButtonMessage;
+  } else {
+    // Reset to default animated dots
+    if (verifyButtonMessage !== 'verifying') {
+      verifyButtonMessage = 'verifying';
+    }
+    let dotCount = ((floor(currentTime / 500) % 3) + 1); // 1..3
+    let dots = '.'.repeat(dotCount);
+    label = 'verifying' + dots;
+  }
 
   noStroke();
   fill(WHITE);
@@ -772,6 +808,41 @@ function drawBottomButton() {
   textSize(16);
   text(label, x + btnW / 2, y + btnH / 2);
   pop();
+  
+  // Store button bounds for click detection
+  if (stage === 'camera') {
+    // Make button bounds available globally
+    window.verifyBtnBox = { x: x, y: y, w: btnW, h: btnH };
+  }
+}
+
+function handleVerifyButtonClick() {
+  verifyButtonClicks++;
+  verifyButtonMessageTime = millis();
+  
+  // Messages get more hostile/desperate with each click
+  if (verifyButtonClicks === 1) {
+    verifyButtonMessage = 'Please wait...';
+  } else if (verifyButtonClicks === 2) {
+    verifyButtonMessage = 'Still processing...';
+  } else if (verifyButtonClicks === 3) {
+    verifyButtonMessage = 'Do not click...';
+  } else if (verifyButtonClicks === 4) {
+    verifyButtonMessage = 'STOP CLICKING';
+  } else if (verifyButtonClicks === 5) {
+    verifyButtonMessage = 'I SAID WAIT';
+  } else if (verifyButtonClicks >= 6) {
+    // Randomize between hostile messages
+    let hostileMessages = [
+      'STOP IT',
+      'WHY ARE YOU DOING THIS',
+      'LEAVE ME ALONE',
+      'ERROR: USER IMPATIENT',
+      'PROCESSING INTERRUPTED',
+      'DO NOT TOUCH'
+    ];
+    verifyButtonMessage = random(hostileMessages);
+  }
 }
 
 /* ------------------ INPUT & POINTER HANDLING ------------------ */
@@ -815,6 +886,17 @@ function handlePointer(px, py) {
 
   // CAMERA stage interactions
   if (stage === 'camera') {
+    
+    // Check if clicking the verify button FIRST (before popups)
+    if (window.verifyBtnBox) {
+      let vb = window.verifyBtnBox;
+      if (px >= vb.x && px <= vb.x + vb.w &&
+          py >= vb.y && py <= vb.y + vb.h) {
+        handleVerifyButtonClick();
+        return false;
+      }
+    }
+    
     // Check if clicking any popup close buttons (check in reverse order - top popup first)
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
@@ -841,6 +923,13 @@ function handlePointer(px, py) {
     if (lastGridBox) {
       if (px >= lastGridBox.x && px <= lastGridBox.x + lastGridBox.size &&
           py >= lastGridBox.y && py <= lastGridBox.y + lastGridBox.size) {
+        
+        // Mark that user has interacted - this triggers popup system
+        if (!userInteracted) {
+          userInteracted = true;
+          feedbackStartMillis = millis(); // Reset timer when first interaction happens
+        }
+        
         // compute which cell
         let localX = px - lastGridBox.x;
         let localY = py - lastGridBox.y;
@@ -918,7 +1007,7 @@ function assignTileEffects() {
     tileSeeds.push(random(1000));
   }
   
-  // Initialize blackout squares (start with some in stage 2+)
+  // Initialize blackout squares (start with some in stage 3+)
   updateBlackoutSquares();
 }
 
