@@ -24,7 +24,7 @@ let buffer = null;
 
 /* feedback timing & content */
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation every 20s (increased from 15s)
+const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation every 20s
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup every 7s
 let lastFeedbackAttempt = 0; // last time we attempted to show a popup
 let userInteracted = false; // track if user has clicked on grid
@@ -37,6 +37,12 @@ let verifyButtonClicks = 0;
 let verifyButtonMessage = 'verifying';
 let verifyButtonMessageTime = 0;
 const VERIFY_BUTTON_MESSAGE_DURATION = 2000; // 2 seconds
+
+/* Stage 7 blackout effect */
+let screenBlackoutProgress = 0; // 0 to 1
+const SCREEN_BLACKOUT_DURATION = 15000; // 15 seconds to fully black out
+let screenBlackoutStartTime = 0;
+let showRestartPopup = false;
 
 /* grid hit test info (updated in draw) */
 let lastGridBox = null; // { x, y, size }
@@ -103,6 +109,11 @@ const FEEDBACK_BY_STAGE = [
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
     "Cannot process image data"
+  ],
+  [
+    "CRITICAL ERROR",
+    "SYSTEM FAILURE IMMINENT",
+    "SHUTTING DOWN"
   ]
 ];
 
@@ -182,7 +193,7 @@ function draw() {
   buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
   buffer.pop();
 
-  // When stageIndex >= 3, enable effects assignment (once) - delayed from stage 2
+  // When stageIndex >= 3, enable effects assignment (once)
   if (stageIndex >= 3 && !effectsAssigned) {
     assignTileEffects();
     effectsAssigned = true;
@@ -305,6 +316,30 @@ function draw() {
   // Manage feedback popups (timing and drawing) - only if user has interacted
   if (userInteracted) {
     manageFeedback(topBarH, stageIndex);
+  }
+  
+  // Stage 7: Screen blackout effect
+  if (stageIndex >= 6) {
+    if (screenBlackoutStartTime === 0) {
+      screenBlackoutStartTime = millis();
+    }
+    
+    let elapsedBlackout = millis() - screenBlackoutStartTime;
+    screenBlackoutProgress = constrain(elapsedBlackout / SCREEN_BLACKOUT_DURATION, 0, 1);
+    
+    // Draw blackout overlay (outside the grid)
+    drawScreenBlackout();
+    
+    // When fully black, show restart popup
+    if (screenBlackoutProgress >= 1 && !showRestartPopup) {
+      showRestartPopup = true;
+      createRestartPopup();
+    }
+  }
+  
+  // Draw restart popup if showing
+  if (showRestartPopup) {
+    drawRestartPopup();
   }
 }
 
@@ -805,7 +840,20 @@ function drawBottomButton() {
   noStroke();
   fill(WHITE);
   textAlign(CENTER, CENTER);
-  textSize(16);
+  
+  // Dynamically adjust text size to fit button width
+  let testSize = 16;
+  textSize(testSize);
+  let textW = textWidth(label);
+  let maxWidth = btnW - 20; // padding on both sides
+  
+  // Scale down text size if it's too wide
+  if (textW > maxWidth) {
+    testSize = testSize * (maxWidth / textW);
+    testSize = max(testSize, 10); // minimum size of 10px
+  }
+  
+  textSize(testSize);
   text(label, x + btnW / 2, y + btnH / 2);
   pop();
   
@@ -843,6 +891,137 @@ function handleVerifyButtonClick() {
     ];
     verifyButtonMessage = random(hostileMessages);
   }
+}
+
+/* ------------------ STAGE 7 BLACKOUT ------------------ */
+function drawScreenBlackout() {
+  push();
+  
+  // Calculate alpha based on progress (0 to 255)
+  let alpha = screenBlackoutProgress * 255;
+  
+  // Create expanding black voids from edges
+  noStroke();
+  fill(0, alpha);
+  
+  // Top section
+  let topHeight = screenBlackoutProgress * height * 0.5;
+  rect(0, 0, width, topHeight);
+  
+  // Bottom section
+  let bottomHeight = screenBlackoutProgress * height * 0.5;
+  rect(0, height - bottomHeight, width, bottomHeight);
+  
+  // Left section
+  let leftWidth = screenBlackoutProgress * width * 0.5;
+  rect(0, 0, leftWidth, height);
+  
+  // Right section
+  let rightWidth = screenBlackoutProgress * width * 0.5;
+  rect(width - rightWidth, 0, rightWidth, height);
+  
+  // Add noise/glitch effect to the blackout
+  if (screenBlackoutProgress > 0.3) {
+    for (let i = 0; i < 50 * screenBlackoutProgress; i++) {
+      let x = random(width);
+      let y = random(height);
+      let size = random(2, 10) * screenBlackoutProgress;
+      fill(0, random(100, 255));
+      rect(x, y, size, size);
+    }
+  }
+  
+  pop();
+}
+
+let restartPopup = null;
+
+function createRestartPopup() {
+  const w = constrain(round(min(width * 0.7, 400)), 300, 400);
+  const h = constrain(round(min(height * 0.3, 200)), 150, 200);
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+  
+  restartPopup = {
+    box: { x, y, w, h },
+    btnBox: null // will be set when drawing
+  };
+}
+
+function drawRestartPopup() {
+  if (!restartPopup) return;
+  
+  const { x, y, w, h } = restartPopup.box;
+  
+  // Dark overlay behind popup
+  push();
+  fill(0, 200);
+  rect(0, 0, width, height);
+  pop();
+  
+  // Popup background
+  push();
+  fill(WHITE);
+  stroke(200);
+  strokeWeight(2);
+  rect(x, y, w, h, 8);
+  pop();
+  
+  // Error icon (red X)
+  push();
+  noStroke();
+  fill(220, 50, 50);
+  let iconSize = 40;
+  let iconX = x + w / 2;
+  let iconY = y + 40;
+  circle(iconX, iconY, iconSize);
+  
+  stroke(WHITE);
+  strokeWeight(4);
+  let crossSize = 12;
+  line(iconX - crossSize, iconY - crossSize, iconX + crossSize, iconY + crossSize);
+  line(iconX - crossSize, iconY + crossSize, iconX + crossSize, iconY - crossSize);
+  pop();
+  
+  // Error message
+  push();
+  noStroke();
+  fill(50);
+  textAlign(CENTER, CENTER);
+  textSize(18);
+  textStyle(BOLD);
+  text("Verification Failed", x + w / 2, y + 85);
+  
+  textStyle(NORMAL);
+  textSize(14);
+  fill(80);
+  text("System encountered a critical error.", x + w / 2, y + 110);
+  pop();
+  
+  // Restart button
+  let btnW = 120;
+  let btnH = 40;
+  let btnX = x + (w - btnW) / 2;
+  let btnY = y + h - btnH - 20;
+  
+  restartPopup.btnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
+  
+  push();
+  fill(BLUE);
+  noStroke();
+  rect(btnX, btnY, btnW, btnH, 6);
+  
+  fill(WHITE);
+  textAlign(CENTER, CENTER);
+  textSize(16);
+  textStyle(BOLD);
+  text("Restart", btnX + btnW / 2, btnY + btnH / 2);
+  pop();
+}
+
+function handleRestartClick() {
+  // Reload the page
+  location.reload();
 }
 
 /* ------------------ INPUT & POINTER HANDLING ------------------ */
@@ -886,6 +1065,16 @@ function handlePointer(px, py) {
 
   // CAMERA stage interactions
   if (stage === 'camera') {
+    
+    // Check if clicking restart popup button (highest priority)
+    if (showRestartPopup && restartPopup && restartPopup.btnBox) {
+      let rb = restartPopup.btnBox;
+      if (px >= rb.x && px <= rb.x + rb.w &&
+          py >= rb.y && py <= rb.y + rb.h) {
+        handleRestartClick();
+        return false;
+      }
+    }
     
     // Check if clicking the verify button FIRST (before popups)
     if (window.verifyBtnBox) {
