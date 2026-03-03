@@ -38,11 +38,12 @@ let verifyButtonMessage = 'verifying';
 let verifyButtonMessageTime = 0;
 const VERIFY_BUTTON_MESSAGE_DURATION = 2000; // 2 seconds
 
-/* Stage 7 blackout effect */
-let screenBlackoutProgress = 0; // 0 to 1
-const SCREEN_BLACKOUT_DURATION = 15000; // 15 seconds to fully black out
-let screenBlackoutStartTime = 0;
-let showRestartPopup = false;
+/* Stage 7: Blue error screen takeover */
+let showBlueErrorScreen = false;
+let errorInfoProgress = 0; // 0..100
+let errorInfoStartTime = 0;
+const ERROR_INFO_DURATION = 12000; // ms to reach 100%
+let restartBtnBox = null;
 
 /* grid hit test info (updated in draw) */
 let lastGridBox = null; // { x, y, size }
@@ -51,7 +52,7 @@ let lastGridBox = null; // { x, y, size }
 let highlightedCell = -1;
 let highlightStart = 0;
 const HIGHLIGHT_DURATION = 400; // ms
-const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA 
+const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA
 
 /* Visual corruption effects (start at feedback stage 3, stronger at stage 4+) */
 let effectsAssigned = false;
@@ -99,12 +100,12 @@ const FEEDBACK_BY_STAGE = [
   ],
   [
     "Why can't I see you clearly?",
-    "Your face keeps changing.",
+    "Your face seems off.",
     "Stop moving around."
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
-    "Your face seems weird. Why are you like that?",
+    "Your face seems weird. Why do you look like that?",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
@@ -162,6 +163,12 @@ function draw() {
     }
     drawBottomButton();
     lastGridBox = null;
+
+    // Blue error screen still takes priority if it has started
+    if (stageIndex >= 6) {
+      startAndDrawBlueErrorScreen();
+    }
+
     return;
   }
 
@@ -219,7 +226,7 @@ function draw() {
       scrambleMapping();
       lastAutoScramble = millis();
     }
-    
+
     // Change blackout pattern
     if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
       updateBlackoutSquares();
@@ -317,30 +324,116 @@ function draw() {
   if (userInteracted) {
     manageFeedback(topBarH, stageIndex);
   }
-  
-  // Stage 7: Screen blackout effect
+
+  // Stage 7: Blue error screen takeover (replaces fade-to-black + restart popup)
   if (stageIndex >= 6) {
-    if (screenBlackoutStartTime === 0) {
-      screenBlackoutStartTime = millis();
-    }
-    
-    let elapsedBlackout = millis() - screenBlackoutStartTime;
-    screenBlackoutProgress = constrain(elapsedBlackout / SCREEN_BLACKOUT_DURATION, 0, 1);
-    
-    // Draw blackout overlay (outside the grid)
-    drawScreenBlackout();
-    
-    // When fully black, show restart popup
-    if (screenBlackoutProgress >= 1 && !showRestartPopup) {
-      showRestartPopup = true;
-      createRestartPopup();
-    }
+    startAndDrawBlueErrorScreen();
   }
-  
-  // Draw restart popup if showing
-  if (showRestartPopup) {
-    drawRestartPopup();
+}
+
+/* ------------------ STAGE 7 BLUE ERROR SCREEN ------------------ */
+
+function startAndDrawBlueErrorScreen() {
+  if (!showBlueErrorScreen) {
+    showBlueErrorScreen = true;
+    errorInfoStartTime = millis();
+    errorInfoProgress = 0;
   }
+
+  // Advance progress to 100%
+  let elapsedErr = millis() - errorInfoStartTime;
+  errorInfoProgress = constrain((elapsedErr / ERROR_INFO_DURATION) * 100, 0, 100);
+
+  drawBlueErrorScreen(round(errorInfoProgress));
+}
+
+function drawBlueErrorScreen(progressPct) {
+  push();
+
+  // Full-screen blue overlay
+  noStroke();
+  fill(BLUE);
+  rect(0, 0, width, height);
+
+  const pad = constrain(round(width * 0.06), 18, 48);
+
+  // Headline
+  fill(255);
+  textAlign(LEFT, TOP);
+  textStyle(BOLD);
+  textSize(constrain(round(width * 0.045), 22, 34));
+  text("Verification failed", pad, pad);
+
+  // Body text
+  textStyle(NORMAL);
+  textSize(constrain(round(width * 0.022), 14, 18));
+
+  let y = pad + constrain(round(width * 0.06), 36, 60);
+  let maxW = width - pad * 2;
+
+  text(
+    "The system was unable to verify that the user is human.",
+    pad,
+    y,
+    maxW
+  );
+
+  y += 44;
+  text(
+    "We will collect error information and then you can restart.",
+    pad,
+    y,
+    maxW
+  );
+
+  // Progress label
+  y += 52;
+  textStyle(BOLD);
+  text(`Collecting error info: ${progressPct}%`, pad, y);
+
+  // Progress bar
+  y += 34;
+  const barW = min(maxW, 520);
+  const barH = 18;
+  const barX = pad;
+  const barY = y;
+
+  // Bar background
+  noStroke();
+  fill(255, 255, 255, 70);
+  rect(barX, barY, barW, barH, 10);
+
+  // Bar fill
+  fill(255);
+  let fillW = (barW * progressPct) / 100;
+  rect(barX, barY, fillW, barH, 10);
+
+  // When complete, show restart button
+  restartBtnBox = null;
+  if (progressPct >= 100) {
+    const btnW = 160;
+    const btnH = 44;
+    const btnX = pad;
+    const btnY = barY + 50;
+
+    restartBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+    // button shadow
+    fill(0, 0, 0, 35);
+    rect(btnX + 2, btnY + 4, btnW, btnH, 10);
+
+    // button
+    fill('#ffffff');
+    rect(btnX, btnY, btnW, btnH, 10);
+
+    fill(BLUE);
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(16);
+    text("Restart", btnX + btnW / 2, btnY + btnH / 2);
+  }
+
+  pop();
 }
 
 /* ------------------ CONSENT UI ------------------ */
@@ -476,7 +569,7 @@ function enterMathCaptcha() {
   }
   positionMathElements();
   mathInput.elt.value = '';
-  
+
   setTimeout(() => {
     if (mathInput && mathInput.elt) {
       mathInput.elt.focus();
@@ -487,7 +580,7 @@ function enterMathCaptcha() {
 function generateMathProblem() {
   let operators = ['+', '-', '×'];
   mathProblem.operator = random(operators);
-  
+
   if (mathProblem.operator === '+') {
     mathProblem.num1 = floor(random(1, 20));
     mathProblem.num2 = floor(random(1, 20));
@@ -566,7 +659,7 @@ function drawMathCaptchaUI() {
   noStroke();
   fill(245);
   rect(x + 20, y + 60, w - 40, 80, 6);
-  
+
   fill(0);
   textAlign(CENTER, CENTER);
   textSize(32);
@@ -583,7 +676,7 @@ function drawMathCaptchaUI() {
   textAlign(LEFT, TOP);
   textSize(13);
   text("Solve the math problem above and enter your answer below.", x + 20, y + 160);
-  
+
   if (mathMsg) {
     fill(180, 30, 30);
     text(mathMsg, x + 20, y + 180);
@@ -600,17 +693,17 @@ function drawMathCaptchaUI() {
 
 function handleMathSubmit() {
   if (!mathInput) return false;
-  
+
   let val = mathInput.elt.value.trim();
   let userAnswer = parseInt(val);
-  
+
   if (isNaN(userAnswer)) {
     mathMsg = "Please enter a valid number.";
     mathInput.elt.value = '';
     mathInput.elt.focus();
     return false;
   }
-  
+
   if (userAnswer === mathProblem.answer) {
     // Correct answer -> move to camera verification
     removeMathElements();
@@ -627,6 +720,12 @@ function handleMathSubmit() {
     lastBlackoutChange = millis();
     lastPopupSpawn = millis();
     userInteracted = false; // Reset interaction flag
+
+    // reset ending screen state
+    showBlueErrorScreen = false;
+    errorInfoProgress = 0;
+    errorInfoStartTime = 0;
+    restartBtnBox = null;
   } else {
     mathAttempts++;
     mathMsg = "Incorrect answer. Try again.";
@@ -823,7 +922,7 @@ function drawBottomButton() {
   // Determine what text to show
   let label = '';
   let currentTime = millis();
-  
+
   // If we're showing a custom message (after button click)
   if (verifyButtonMessage !== 'verifying' && currentTime - verifyButtonMessageTime < VERIFY_BUTTON_MESSAGE_DURATION) {
     label = verifyButtonMessage;
@@ -840,23 +939,23 @@ function drawBottomButton() {
   noStroke();
   fill(WHITE);
   textAlign(CENTER, CENTER);
-  
+
   // Dynamically adjust text size to fit button width
   let testSize = 16;
   textSize(testSize);
   let textW = textWidth(label);
   let maxWidth = btnW - 20; // padding on both sides
-  
+
   // Scale down text size if it's too wide
   if (textW > maxWidth) {
     testSize = testSize * (maxWidth / textW);
     testSize = max(testSize, 10); // minimum size of 10px
   }
-  
+
   textSize(testSize);
   text(label, x + btnW / 2, y + btnH / 2);
   pop();
-  
+
   // Store button bounds for click detection
   if (stage === 'camera') {
     // Make button bounds available globally
@@ -867,7 +966,7 @@ function drawBottomButton() {
 function handleVerifyButtonClick() {
   verifyButtonClicks++;
   verifyButtonMessageTime = millis();
-  
+
   // Messages get more hostile/desperate with each click
   if (verifyButtonClicks === 1) {
     verifyButtonMessage = 'Please wait...';
@@ -891,137 +990,6 @@ function handleVerifyButtonClick() {
     ];
     verifyButtonMessage = random(hostileMessages);
   }
-}
-
-/* ------------------ STAGE 7 BLACKOUT ------------------ */
-function drawScreenBlackout() {
-  push();
-  
-  // Calculate alpha based on progress (0 to 255)
-  let alpha = screenBlackoutProgress * 255;
-  
-  // Create expanding black voids from edges
-  noStroke();
-  fill(0, alpha);
-  
-  // Top section
-  let topHeight = screenBlackoutProgress * height * 0.5;
-  rect(0, 0, width, topHeight);
-  
-  // Bottom section
-  let bottomHeight = screenBlackoutProgress * height * 0.5;
-  rect(0, height - bottomHeight, width, bottomHeight);
-  
-  // Left section
-  let leftWidth = screenBlackoutProgress * width * 0.5;
-  rect(0, 0, leftWidth, height);
-  
-  // Right section
-  let rightWidth = screenBlackoutProgress * width * 0.5;
-  rect(width - rightWidth, 0, rightWidth, height);
-  
-  // Add noise/glitch effect to the blackout
-  if (screenBlackoutProgress > 0.3) {
-    for (let i = 0; i < 50 * screenBlackoutProgress; i++) {
-      let x = random(width);
-      let y = random(height);
-      let size = random(2, 10) * screenBlackoutProgress;
-      fill(0, random(100, 255));
-      rect(x, y, size, size);
-    }
-  }
-  
-  pop();
-}
-
-let restartPopup = null;
-
-function createRestartPopup() {
-  const w = constrain(round(min(width * 0.7, 400)), 300, 400);
-  const h = constrain(round(min(height * 0.3, 200)), 150, 200);
-  const x = (width - w) / 2;
-  const y = (height - h) / 2;
-  
-  restartPopup = {
-    box: { x, y, w, h },
-    btnBox: null // will be set when drawing
-  };
-}
-
-function drawRestartPopup() {
-  if (!restartPopup) return;
-  
-  const { x, y, w, h } = restartPopup.box;
-  
-  // Dark overlay behind popup
-  push();
-  fill(0, 200);
-  rect(0, 0, width, height);
-  pop();
-  
-  // Popup background
-  push();
-  fill(WHITE);
-  stroke(200);
-  strokeWeight(2);
-  rect(x, y, w, h, 8);
-  pop();
-  
-  // Error icon (red X)
-  push();
-  noStroke();
-  fill(220, 50, 50);
-  let iconSize = 40;
-  let iconX = x + w / 2;
-  let iconY = y + 40;
-  circle(iconX, iconY, iconSize);
-  
-  stroke(WHITE);
-  strokeWeight(4);
-  let crossSize = 12;
-  line(iconX - crossSize, iconY - crossSize, iconX + crossSize, iconY + crossSize);
-  line(iconX - crossSize, iconY + crossSize, iconX + crossSize, iconY - crossSize);
-  pop();
-  
-  // Error message
-  push();
-  noStroke();
-  fill(50);
-  textAlign(CENTER, CENTER);
-  textSize(18);
-  textStyle(BOLD);
-  text("Verification Failed", x + w / 2, y + 85);
-  
-  textStyle(NORMAL);
-  textSize(14);
-  fill(80);
-  text("System encountered a critical error.", x + w / 2, y + 110);
-  pop();
-  
-  // Restart button
-  let btnW = 120;
-  let btnH = 40;
-  let btnX = x + (w - btnW) / 2;
-  let btnY = y + h - btnH - 20;
-  
-  restartPopup.btnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
-  
-  push();
-  fill(BLUE);
-  noStroke();
-  rect(btnX, btnY, btnW, btnH, 6);
-  
-  fill(WHITE);
-  textAlign(CENTER, CENTER);
-  textSize(16);
-  textStyle(BOLD);
-  text("Restart", btnX + btnW / 2, btnY + btnH / 2);
-  pop();
-}
-
-function handleRestartClick() {
-  // Reload the page
-  location.reload();
 }
 
 /* ------------------ INPUT & POINTER HANDLING ------------------ */
@@ -1065,17 +1033,19 @@ function handlePointer(px, py) {
 
   // CAMERA stage interactions
   if (stage === 'camera') {
-    
-    // Check if clicking restart popup button (highest priority)
-    if (showRestartPopup && restartPopup && restartPopup.btnBox) {
-      let rb = restartPopup.btnBox;
-      if (px >= rb.x && px <= rb.x + rb.w &&
-          py >= rb.y && py <= rb.y + rb.h) {
-        handleRestartClick();
-        return false;
+
+    // If blue error screen is active, consume clicks; restart only when complete.
+    if (showBlueErrorScreen) {
+      if (errorInfoProgress >= 100 && restartBtnBox) {
+        if (px >= restartBtnBox.x && px <= restartBtnBox.x + restartBtnBox.w &&
+            py >= restartBtnBox.y && py <= restartBtnBox.y + restartBtnBox.h) {
+          location.reload();
+          return false;
+        }
       }
+      return false;
     }
-    
+
     // Check if clicking the verify button FIRST (before popups)
     if (window.verifyBtnBox) {
       let vb = window.verifyBtnBox;
@@ -1085,7 +1055,7 @@ function handlePointer(px, py) {
         return false;
       }
     }
-    
+
     // Check if clicking any popup close buttons (check in reverse order - top popup first)
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
@@ -1112,13 +1082,13 @@ function handlePointer(px, py) {
     if (lastGridBox) {
       if (px >= lastGridBox.x && px <= lastGridBox.x + lastGridBox.size &&
           py >= lastGridBox.y && py <= lastGridBox.y + lastGridBox.size) {
-        
+
         // Mark that user has interacted - this triggers popup system
         if (!userInteracted) {
           userInteracted = true;
           feedbackStartMillis = millis(); // Reset timer when first interaction happens
         }
-        
+
         // compute which cell
         let localX = px - lastGridBox.x;
         let localY = py - lastGridBox.y;
@@ -1175,7 +1145,7 @@ function updateBlackoutSquares() {
   for (let i = 0; i < gridCols * gridRows; i++) {
     available.push(i);
   }
-  
+
   // Shuffle and pick
   for (let i = 0; i < count; i++) {
     if (available.length === 0) break;
@@ -1195,7 +1165,7 @@ function assignTileEffects() {
     tileEffects.push(pick);
     tileSeeds.push(random(1000));
   }
-  
+
   // Initialize blackout squares (start with some in stage 3+)
   updateBlackoutSquares();
 }
@@ -1242,7 +1212,7 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
       // occasional white speck
       if (random() < 0.15 * intensity) {
         fill(255, 255, 255, a * 0.6);
-        rect(nx + random(-1,1), ny + random(-1,1), s * 0.5, s * 0.5);
+        rect(nx + random(-1, 1), ny + random(-1, 1), s * 0.5, s * 0.5);
       }
     }
     pop();
@@ -1264,8 +1234,8 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
       g.loadPixels();
       for (let i = 0; i < g.pixels.length; i += 4) {
         g.pixels[i] = constrain(g.pixels[i] + random(-10, 10) * intensity, 0, 255);
-        g.pixels[i+1] = constrain(g.pixels[i+1] + random(-10, 10) * intensity, 0, 255);
-        g.pixels[i+2] = constrain(g.pixels[i+2] + random(-10, 10) * intensity, 0, 255);
+        g.pixels[i + 1] = constrain(g.pixels[i + 1] + random(-10, 10) * intensity, 0, 255);
+        g.pixels[i + 2] = constrain(g.pixels[i + 2] + random(-10, 10) * intensity, 0, 255);
       }
       g.updatePixels();
     }
