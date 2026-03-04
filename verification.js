@@ -381,6 +381,7 @@ function drawBlueErrorScreenCentered(progressPct) {
   noStroke();
   fill(BSOD_BLUE);
   rect(0, 0, width, height);
+  textFont('Consolas, "Courier New", monospace');
 
   // Centered content block
   const panelW = min(width * 0.86, 820);
@@ -422,7 +423,7 @@ function drawBlueErrorScreenCentered(progressPct) {
 
   y += 54;
   text(
-    "We're just collecting some error info, and then we'll restart for you.",
+    "We're just collecting some error info, and then you can restart the process.",
     x, y, maxW
   );
 
