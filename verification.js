@@ -56,7 +56,7 @@ const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA
 
 /* Visual corruption effects (start at feedback stage 3, stronger at stage 4+) */
 let effectsAssigned = false;
-let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur, 5 blackout
+let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur
 let tileSeeds = []; // per-tile random seeds for animation
 
 /* Blackout squares state */
@@ -77,35 +77,42 @@ const BLUE = '#1a73e8';
 const WHITE = '#ffffff';
 const TEXT_COLOR = '#ffffff';
 
+// This matches your test HTML background
+const BSOD_BLUE = '#0037DA';
+
+/* Non-repeating feedback picker state (for stages 0–4) */
+let feedbackBagByStage = {};     // stageIndex -> array of remaining message indices
+let lastFeedbackMsgByStage = {}; // stageIndex -> last message string (to avoid immediate repeat on reshuffle)
+
 const FEEDBACK_BY_STAGE = [
   [
     "Please position your face inside the grid.",
-    "Please fix your hair.",
-    "Hold still for a moment."
-  ],
-  [
     "Ensure proper lighting for verification.",
-    "Center your face in the frame.",
-    "Remove any obstructions."
+    "Make sure your face is visible to the camera."
   ],
   [
-    "Face is unclear. Move towards better lighting.",
-    "You're too far away, move closer to the camera.",
+    "Move a little closer to the camera.",
+    "Center your face in the frame.",
+    "Remove anything covering your face."
+  ],
+  [
+    "Stop moving.",
+    "Try fixing your hair.",
     "Fix your posture."
   ],
   [
     "Is something wrong with your face?",
-    "I can't seem to verify you. Look straight at me.",
-    "Try smiling."
+    "I can't seem to verify you. You look strange from this angle.",
+    "You look tired. Open your eyes more."
   ],
   [
-    "Why can't I see you clearly?",
-    "Your face seems off.",
-    "Stop moving around."
+    "You could at least try to look more presentable.",
+    "Why do you look like that?",
+    "Your expression seems off. You’d look better if you smiled."
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
-    "Your face seems weird. Why do you look like that?",
+    "Is something wrong with your face? Your face seems weird.",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
@@ -150,6 +157,13 @@ function draw() {
   let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
   stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
+  // ✅ Performance: once we hit the ending stage, draw ONLY the blue screen and stop.
+  if (stageIndex >= 6 || showBlueErrorScreen) {
+    startAndDrawBlueErrorScreen();
+    lastGridBox = null;
+    return;
+  }
+
   // If camera not ready, show loading
   if (!capture || !capture.elt || !capture.elt.videoWidth || !capture.elt.videoHeight) {
     fill(0);
@@ -157,18 +171,10 @@ function draw() {
     textAlign(CENTER, CENTER);
     textSize(20);
     text("Starting camera...", width / 2, height / 2);
-    // Only show popups if user has interacted
-    if (userInteracted) {
-      manageFeedback(topBarH, stageIndex);
-    }
+
+    if (userInteracted) manageFeedback(topBarH, stageIndex);
     drawBottomButton();
     lastGridBox = null;
-
-    // Blue error screen still takes priority if it has started
-    if (stageIndex >= 6) {
-      startAndDrawBlueErrorScreen();
-    }
-
     return;
   }
 
@@ -205,7 +211,6 @@ function draw() {
     assignTileEffects();
     effectsAssigned = true;
   }
-  // If stage has dropped below 3 clear effects (unlikely)
   if (stageIndex < 3 && effectsAssigned) {
     effectsAssigned = false;
     tileEffects = [];
@@ -215,19 +220,16 @@ function draw() {
 
   // Intensity: subtle at stage 3-4, stronger at stage 5+
   let intensity = 0.0;
-  if (stageIndex === 3) intensity = 0.3; // very subtle
-  if (stageIndex === 4) intensity = 0.6; // medium
-  if (stageIndex >= 5) intensity = 1.0; // strong
+  if (stageIndex === 3) intensity = 0.3;
+  if (stageIndex === 4) intensity = 0.6;
+  if (stageIndex >= 5) intensity = 1.0;
 
   // Stage 5+: auto-scramble and move blackout squares
   if (stageIndex >= 4) {
-    // Auto-scramble grid
     if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
       scrambleMapping();
       lastAutoScramble = millis();
     }
-
-    // Change blackout pattern
     if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
       updateBlackoutSquares();
       lastBlackoutChange = millis();
@@ -253,33 +255,26 @@ function draw() {
       let destIndex = r * gridCols + c;
       let srcIndex = mapping[destIndex];
 
-      // Check if this square is blacked out
       if (blackoutSquares.includes(destIndex)) {
-        // Draw black square
         let dx = c * destCellSize;
         let dy = r * destCellSize;
         fill(0);
         noStroke();
         rect(dx, dy, destCellSize, destCellSize);
-        continue; // skip rendering the actual tile
+        continue;
       }
 
-      // Source coordinates inside the buffer
       let srcX = (srcIndex % gridCols) * srcCellSize;
       let srcY = Math.floor(srcIndex / gridCols) * srcCellSize;
 
-      // Get tile as p5.Image
       let tile = buffer.get(srcX, srcY, srcCellSize, srcCellSize);
 
-      // Destination on canvas within flipped space
       let dx = c * destCellSize;
       let dy = r * destCellSize;
 
-      // If effects are active, apply per-tile effect before drawing
       if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
         applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
       } else {
-        // draw tile normally scaled to destination cell
         image(tile, dx, dy, destCellSize, destCellSize);
       }
     }
@@ -296,7 +291,6 @@ function draw() {
       noStroke();
       fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
       rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
-      // optional thicker stroke border
       stroke(212, 246, 255);
       strokeWeight(3);
       noFill();
@@ -317,22 +311,56 @@ function draw() {
     }
   }
 
-  // Bottom-right verifying button (animated dots)
   drawBottomButton();
 
-  // Manage feedback popups (timing and drawing) - only if user has interacted
-  if (userInteracted) {
-    manageFeedback(topBarH, stageIndex);
-  }
+  if (userInteracted) manageFeedback(topBarH, stageIndex);
+}
 
-  // Stage 7: Blue error screen takeover (replaces fade-to-black + restart popup)
-  if (stageIndex >= 6) {
-    startAndDrawBlueErrorScreen();
+/* ------------------ NON-REPEATING FEEDBACK PICKER ------------------ */
+function resetFeedbackBagForStage(stageIndex) {
+  const pool = FEEDBACK_BY_STAGE[stageIndex] || [];
+  feedbackBagByStage[stageIndex] = pool.map((_, i) => i);
+
+  // shuffle
+  for (let i = feedbackBagByStage[stageIndex].length - 1; i > 0; i--) {
+    const j = floor(random(i + 1));
+    [feedbackBagByStage[stageIndex][i], feedbackBagByStage[stageIndex][j]] =
+      [feedbackBagByStage[stageIndex][j], feedbackBagByStage[stageIndex][i]];
   }
 }
 
-/* ------------------ STAGE 7 BLUE ERROR SCREEN ------------------ */
+function pickNonRepeatingFeedback(stageIndex) {
+  const pool = FEEDBACK_BY_STAGE[stageIndex] || [];
+  if (pool.length === 0) return "";
 
+  // Only enforce non-repeat for stages 0–4
+  if (stageIndex > 4) {
+    return pool[floor(random(pool.length))];
+  }
+
+  if (!feedbackBagByStage[stageIndex] || feedbackBagByStage[stageIndex].length === 0) {
+    resetFeedbackBagForStage(stageIndex);
+  }
+
+  // pop next index
+  let idx = feedbackBagByStage[stageIndex].pop();
+  let msg = pool[idx];
+
+  // avoid immediate repeat across reshuffles (rare)
+  if (pool.length > 1 && msg === lastFeedbackMsgByStage[stageIndex]) {
+    if (feedbackBagByStage[stageIndex].length > 0) {
+      const idx2 = feedbackBagByStage[stageIndex].pop();
+      feedbackBagByStage[stageIndex].unshift(idx);
+      idx = idx2;
+      msg = pool[idx];
+    }
+  }
+
+  lastFeedbackMsgByStage[stageIndex] = msg;
+  return msg;
+}
+
+/* ------------------ ENDING (centered, like your test HTML) ------------------ */
 function startAndDrawBlueErrorScreen() {
   if (!showBlueErrorScreen) {
     showBlueErrorScreen = true;
@@ -340,96 +368,104 @@ function startAndDrawBlueErrorScreen() {
     errorInfoProgress = 0;
   }
 
-  // Advance progress to 100%
   let elapsedErr = millis() - errorInfoStartTime;
   errorInfoProgress = constrain((elapsedErr / ERROR_INFO_DURATION) * 100, 0, 100);
 
-  drawBlueErrorScreen(round(errorInfoProgress));
+  drawBlueErrorScreenCentered(round(errorInfoProgress));
 }
 
-function drawBlueErrorScreen(progressPct) {
+function drawBlueErrorScreenCentered(progressPct) {
   push();
 
-  // Full-screen blue overlay
+  // Full-screen blue
   noStroke();
-  fill(BLUE);
+  fill(BSOD_BLUE);
   rect(0, 0, width, height);
 
-  const pad = constrain(round(width * 0.06), 18, 48);
+  // Centered content block
+  const panelW = min(width * 0.86, 820);
+  const panelH = min(height * 0.70, 520);
+  const panelX = (width - panelW) / 2;
+  const panelY = (height - panelH) / 2;
 
-  // Headline
+  // subtle darker overlay
+  fill(0, 0, 0, 18);
+  rect(panelX, panelY, panelW, panelH, 2);
+
+  const pad = 26;
+  const x = panelX + pad;
+  let y = panelY + pad;
+  const maxW = panelW - pad * 2;
+
   fill(255);
   textAlign(LEFT, TOP);
+
+  // Header face
   textStyle(BOLD);
-  textSize(constrain(round(width * 0.045), 22, 34));
-  text("Verification failed", pad, pad);
+  textSize(38);
+  text(":( ", x, y);
 
-  // Body text
+  y += 58;
   textStyle(NORMAL);
-  textSize(constrain(round(width * 0.022), 14, 18));
+  textSize(18);
 
-  let y = pad + constrain(round(width * 0.06), 36, 60);
-  let maxW = width - pad * 2;
+  text(
+    "Your system ran into a problem and couldn't complete verification.",
+    x, y, maxW
+  );
 
+  y += 54;
   text(
     "The system was unable to verify that the user is human.",
-    pad,
-    y,
-    maxW
+    x, y, maxW
   );
 
-  y += 44;
+  y += 54;
   text(
-    "We will collect error information and then you can restart.",
-    pad,
-    y,
-    maxW
+    "We're just collecting some error info, and then we'll restart for you.",
+    x, y, maxW
   );
 
-  // Progress label
-  y += 52;
+  // Progress
+  y += 66;
   textStyle(BOLD);
-  text(`Collecting error info: ${progressPct}%`, pad, y);
+  textSize(20);
+  text(`${progressPct}% complete`, x, y);
 
-  // Progress bar
+  // Bar
   y += 34;
   const barW = min(maxW, 520);
-  const barH = 18;
-  const barX = pad;
-  const barY = y;
+  const barH = 10;
 
-  // Bar background
   noStroke();
-  fill(255, 255, 255, 70);
-  rect(barX, barY, barW, barH, 10);
+  fill(255, 255, 255, 55);
+  rect(x, y, barW, barH);
 
-  // Bar fill
   fill(255);
-  let fillW = (barW * progressPct) / 100;
-  rect(barX, barY, fillW, barH, 10);
+  rect(x, y, (barW * progressPct) / 100, barH);
 
-  // When complete, show restart button
+  // Restart button (when complete)
   restartBtnBox = null;
   if (progressPct >= 100) {
-    const btnW = 160;
+    y += 54;
+
+    const btnW = 220;
     const btnH = 44;
-    const btnX = pad;
-    const btnY = barY + 50;
+    const btnX = x;
+    const btnY = y;
 
     restartBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
 
-    // button shadow
-    fill(0, 0, 0, 35);
-    rect(btnX + 2, btnY + 4, btnW, btnH, 10);
+    noFill();
+    stroke(255);
+    strokeWeight(2);
+    rect(btnX, btnY, btnW, btnH);
 
-    // button
-    fill('#ffffff');
-    rect(btnX, btnY, btnW, btnH, 10);
-
-    fill(BLUE);
+    noStroke();
+    fill(255);
     textAlign(CENTER, CENTER);
     textStyle(BOLD);
-    textSize(16);
+    textSize(18);
     text("Restart", btnX + btnW / 2, btnY + btnH / 2);
   }
 
@@ -443,14 +479,12 @@ function drawConsentUI() {
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  // Card
   push();
   fill(WHITE);
   stroke(200);
   rect(x, y, w, h, 8);
   pop();
 
-  // Title
   push();
   noStroke();
   fill(0);
@@ -461,18 +495,15 @@ function drawConsentUI() {
   textStyle(NORMAL);
   pop();
 
-  // Checkbox + label
   let cbSize = constrain(round(min(w * 0.06, 28)), 20, 28);
   let cbX = x + 28;
   let cbY = y + 80;
   consentBox = { x: cbX, y: cbY, size: cbSize };
 
-  // Draw checkbox border
   push();
   fill(WHITE);
   stroke(120);
   rect(cbX, cbY, cbSize, cbSize, 4);
-  // check mark if checked
   if (consentChecked) {
     noStroke();
     fill(BLUE);
@@ -485,7 +516,6 @@ function drawConsentUI() {
   }
   pop();
 
-  // Label text
   push();
   noStroke();
   fill(0);
@@ -496,7 +526,6 @@ function drawConsentUI() {
   text("I am not a robot", labelX, labelY);
   pop();
 
-  // Small explanatory text
   push();
   noStroke();
   fill(90);
@@ -505,7 +534,6 @@ function drawConsentUI() {
   text("Please check the box and press Continue to begin verification.", x + 28, y + 120, w - 56);
   pop();
 
-  // Continue button
   let btnW = constrain(round(w * 0.4), 120, w - 56);
   let btnH = 44;
   let btnX = x + w - btnW - 28;
@@ -520,7 +548,7 @@ function drawConsentUI() {
   noStroke();
   textAlign(CENTER, CENTER);
   textSize(16);
-  text(consentChecked ? "Continue" : "Continue", btnX + btnW / 2, btnY + btnH / 2);
+  text("Continue", btnX + btnW / 2, btnY + btnH / 2);
   pop();
 }
 
@@ -571,9 +599,7 @@ function enterMathCaptcha() {
   mathInput.elt.value = '';
 
   setTimeout(() => {
-    if (mathInput && mathInput.elt) {
-      mathInput.elt.focus();
-    }
+    if (mathInput && mathInput.elt) mathInput.elt.focus();
   }, 300);
 }
 
@@ -589,7 +615,7 @@ function generateMathProblem() {
     mathProblem.num1 = floor(random(10, 30));
     mathProblem.num2 = floor(random(1, mathProblem.num1));
     mathProblem.answer = mathProblem.num1 - mathProblem.num2;
-  } else { // multiplication
+  } else {
     mathProblem.num1 = floor(random(2, 12));
     mathProblem.num2 = floor(random(2, 12));
     mathProblem.answer = mathProblem.num1 * mathProblem.num2;
@@ -620,14 +646,8 @@ function positionMathElements() {
 }
 
 function removeMathElements() {
-  if (mathInput) {
-    mathInput.remove();
-    mathInput = null;
-  }
-  if (mathSubmitBtn) {
-    mathSubmitBtn.remove();
-    mathSubmitBtn = null;
-  }
+  if (mathInput) { mathInput.remove(); mathInput = null; }
+  if (mathSubmitBtn) { mathSubmitBtn.remove(); mathSubmitBtn = null; }
 }
 
 function drawMathCaptchaUI() {
@@ -636,14 +656,12 @@ function drawMathCaptchaUI() {
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  // Card
   push();
   fill(WHITE);
   stroke(200);
   rect(x, y, w, h, 8);
   pop();
 
-  // Title
   push();
   noStroke();
   fill(0);
@@ -654,7 +672,6 @@ function drawMathCaptchaUI() {
   textStyle(NORMAL);
   pop();
 
-  // Math problem display
   push();
   noStroke();
   fill(245);
@@ -669,26 +686,20 @@ function drawMathCaptchaUI() {
   textStyle(NORMAL);
   pop();
 
-  // Instructions
   push();
   noStroke();
   fill(60);
   textAlign(LEFT, TOP);
   textSize(13);
   text("Solve the math problem above and enter your answer below.", x + 20, y + 160);
-
   if (mathMsg) {
     fill(180, 30, 30);
     text(mathMsg, x + 20, y + 180);
   }
   pop();
 
-  // Ensure DOM elements exist & positioned
-  if (!mathInput || !mathSubmitBtn) {
-    enterMathCaptcha();
-  } else {
-    positionMathElements();
-  }
+  if (!mathInput || !mathSubmitBtn) enterMathCaptcha();
+  else positionMathElements();
 }
 
 function handleMathSubmit() {
@@ -705,13 +716,13 @@ function handleMathSubmit() {
   }
 
   if (userAnswer === mathProblem.answer) {
-    // Correct answer -> move to camera verification
     removeMathElements();
     mathMsg = '';
     stage = 'camera';
     started = true;
     capture = createCapture({ audio: false, video: { facingMode: "user" } });
     capture.hide();
+
     // initialize feedback timers
     feedbackStartMillis = millis();
     lastFeedbackAttempt = millis();
@@ -719,30 +730,30 @@ function handleMathSubmit() {
     lastAutoScramble = millis();
     lastBlackoutChange = millis();
     lastPopupSpawn = millis();
-    userInteracted = false; // Reset interaction flag
+    userInteracted = false;
 
     // reset ending screen state
     showBlueErrorScreen = false;
     errorInfoProgress = 0;
     errorInfoStartTime = 0;
     restartBtnBox = null;
+
+    // reset non-repeat feedback state
+    feedbackBagByStage = {};
+    lastFeedbackMsgByStage = {};
   } else {
     mathAttempts++;
     mathMsg = "Incorrect answer. Try again.";
-    // Generate new problem after wrong attempt
     generateMathProblem();
     mathInput.elt.value = '';
     setTimeout(() => {
-      if (mathInput && mathInput.elt) {
-        mathInput.elt.focus();
-      }
+      if (mathInput && mathInput.elt) mathInput.elt.focus();
     }, 100);
   }
   return false;
 }
 
 /* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
-
 function drawTopBar(topBarH) {
   fill(BLUE);
   rect(0, 0, width, topBarH);
@@ -773,26 +784,22 @@ function drawTopBar(topBarH) {
 function manageFeedback(topBarH, stageIndex) {
   if (!feedbackStartMillis) feedbackStartMillis = millis();
 
-  // Stage 6: spawn multiple popups aggressively
+  // Stage 5+: multiple popups (chaotic)
   if (stageIndex >= 5) {
-    // Spawn new popups periodically until we hit max
     if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_6) {
-      let pool = FEEDBACK_BY_STAGE[stageIndex];
-      let message = pool[floor(random(pool.length))];
-      createAndAddPopup(message, topBarH, true); // true = random position
+      let message = pickNonRepeatingFeedback(stageIndex);
+      createAndAddPopup(message, topBarH, true);
       lastPopupSpawn = millis();
     }
   } else {
-    // Stages 0-4: single popup behavior (original)
+    // Stages 0-4: single popup, non-repeating until exhausted
     if (popups.length === 0 && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
-      let pool = FEEDBACK_BY_STAGE[stageIndex];
-      let message = pool[floor(random(pool.length))];
-      createAndAddPopup(message, topBarH, false); // false = centered
+      let message = pickNonRepeatingFeedback(stageIndex);
+      createAndAddPopup(message, topBarH, false);
       lastFeedbackAttempt = millis();
     }
   }
 
-  // Draw all popups
   for (let i = 0; i < popups.length; i++) {
     drawPopup(popups[i]);
   }
@@ -803,14 +810,11 @@ function createAndAddPopup(message, topBarH, randomPosition) {
   const w = constrain(round(maxW), 280, maxW);
   const h = constrain(round(height * 0.16), 100, 220);
 
-  // Position logic
   let x, y;
   if (randomPosition) {
-    // Stage 6: random scattered positions with padding
     x = random(10, max(10, width - w - 10));
     y = random(topBarH + 10, max(topBarH + 10, height - h - 70));
   } else {
-    // First popup or stages 0-4: center on grid
     if (lastGridBox && lastGridBox.size > 0) {
       x = lastGridBox.x + (lastGridBox.size - w) / 2;
       y = lastGridBox.y + (lastGridBox.size - h) / 2;
@@ -826,24 +830,18 @@ function createAndAddPopup(message, topBarH, randomPosition) {
   let cbY = y + cbR + 8;
   let closeBtn = { x: cbX, y: cbY, r: cbR };
 
-  popups.push({
-    message: message,
-    box: popupBox,
-    closeBtn: closeBtn
-  });
+  popups.push({ message, box: popupBox, closeBtn });
 }
 
 function drawPopup(popup) {
   const { x, y, w, h } = popup.box;
 
-  // popup background (NO shadow)
   push();
   fill(WHITE);
   stroke(200);
   rect(x, y, w, h, 8);
   pop();
 
-  // top chrome
   let chromeH = 28;
   push();
   fill(245);
@@ -851,7 +849,6 @@ function drawPopup(popup) {
   rect(x, y, w, chromeH, 8, 8, 0, 0);
   pop();
 
-  // traffic lights
   push();
   let gap = 8;
   let r = 6;
@@ -863,7 +860,6 @@ function drawPopup(popup) {
   fill('#28c840'); circle(tlX + 2 * (r * 2 + gap), tlY, r * 2);
   pop();
 
-  // title
   push();
   noStroke();
   fill(80);
@@ -872,7 +868,6 @@ function drawPopup(popup) {
   text("Verification", x + w / 2, y + chromeH / 2);
   pop();
 
-  // close button
   push();
   fill(230);
   circle(popup.closeBtn.x, popup.closeBtn.y, popup.closeBtn.r * 2);
@@ -883,7 +878,6 @@ function drawPopup(popup) {
   noStroke();
   pop();
 
-  // popup text
   push();
   noStroke();
   fill(40);
@@ -900,7 +894,7 @@ function drawPopup(popup) {
   pop();
 }
 
-/* Draw bottom button with animated dots and click response */
+/* ------------------ BOTTOM BUTTON ------------------ */
 function drawBottomButton() {
   let btnW = constrain(round(width * 0.28), 120, 260);
   let btnH = 46;
@@ -908,7 +902,6 @@ function drawBottomButton() {
   let x = width - btnW - margin;
   let y = height - btnH - margin;
 
-  // shadow
   push();
   fill(0, 0, 0, 30);
   rect(x + 2, y + 4, btnW, btnH, 8);
@@ -919,47 +912,37 @@ function drawBottomButton() {
   noStroke();
   rect(x, y, btnW, btnH, 8);
 
-  // Determine what text to show
   let label = '';
   let currentTime = millis();
 
-  // If we're showing a custom message (after button click)
   if (verifyButtonMessage !== 'verifying' && currentTime - verifyButtonMessageTime < VERIFY_BUTTON_MESSAGE_DURATION) {
     label = verifyButtonMessage;
   } else {
-    // Reset to default animated dots
-    if (verifyButtonMessage !== 'verifying') {
-      verifyButtonMessage = 'verifying';
-    }
-    let dotCount = ((floor(currentTime / 500) % 3) + 1); // 1..3
-    let dots = '.'.repeat(dotCount);
-    label = 'verifying' + dots;
+    if (verifyButtonMessage !== 'verifying') verifyButtonMessage = 'verifying';
+    let dotCount = ((floor(currentTime / 500) % 3) + 1);
+    label = 'verifying' + '.'.repeat(dotCount);
   }
 
   noStroke();
   fill(WHITE);
   textAlign(CENTER, CENTER);
 
-  // Dynamically adjust text size to fit button width
   let testSize = 16;
   textSize(testSize);
   let textW = textWidth(label);
-  let maxWidth = btnW - 20; // padding on both sides
+  let maxWidth = btnW - 20;
 
-  // Scale down text size if it's too wide
   if (textW > maxWidth) {
     testSize = testSize * (maxWidth / textW);
-    testSize = max(testSize, 10); // minimum size of 10px
+    testSize = max(testSize, 10);
   }
 
   textSize(testSize);
   text(label, x + btnW / 2, y + btnH / 2);
   pop();
 
-  // Store button bounds for click detection
   if (stage === 'camera') {
-    // Make button bounds available globally
-    window.verifyBtnBox = { x: x, y: y, w: btnW, h: btnH };
+    window.verifyBtnBox = { x, y, w: btnW, h: btnH };
   }
 }
 
@@ -967,19 +950,12 @@ function handleVerifyButtonClick() {
   verifyButtonClicks++;
   verifyButtonMessageTime = millis();
 
-  // Messages get more hostile/desperate with each click
-  if (verifyButtonClicks === 1) {
-    verifyButtonMessage = 'Please wait...';
-  } else if (verifyButtonClicks === 2) {
-    verifyButtonMessage = 'Still processing...';
-  } else if (verifyButtonClicks === 3) {
-    verifyButtonMessage = 'Do not click...';
-  } else if (verifyButtonClicks === 4) {
-    verifyButtonMessage = 'STOP CLICKING';
-  } else if (verifyButtonClicks === 5) {
-    verifyButtonMessage = 'I SAID WAIT';
-  } else if (verifyButtonClicks >= 6) {
-    // Randomize between hostile messages
+  if (verifyButtonClicks === 1) verifyButtonMessage = 'Please wait...';
+  else if (verifyButtonClicks === 2) verifyButtonMessage = 'Still processing...';
+  else if (verifyButtonClicks === 3) verifyButtonMessage = 'Do not click...';
+  else if (verifyButtonClicks === 4) verifyButtonMessage = 'STOP CLICKING';
+  else if (verifyButtonClicks === 5) verifyButtonMessage = 'I SAID WAIT';
+  else {
     let hostileMessages = [
       'STOP IT',
       'WHY ARE YOU DOING THIS',
@@ -993,15 +969,11 @@ function handleVerifyButtonClick() {
 }
 
 /* ------------------ INPUT & POINTER HANDLING ------------------ */
-function touchStarted() {
-  return handlePointer(mouseX, mouseY);
-}
-function mousePressed() {
-  return handlePointer(mouseX, mouseY);
-}
+function touchStarted() { return handlePointer(mouseX, mouseY); }
+function mousePressed() { return handlePointer(mouseX, mouseY); }
 
 function handlePointer(px, py) {
-  // CONSENT stage interactions
+  // CONSENT stage
   if (stage === 'consent') {
     if (consentBox && px >= consentBox.x && px <= consentBox.x + consentBox.size &&
         py >= consentBox.y && py <= consentBox.y + consentBox.size) {
@@ -1017,7 +989,6 @@ function handlePointer(px, py) {
     if (continueBtnBox && px >= continueBtnBox.x && px <= continueBtnBox.x + continueBtnBox.w &&
         py >= continueBtnBox.y && py <= continueBtnBox.y + continueBtnBox.h) {
       if (consentChecked) {
-        // Move to math captcha stage
         stage = 'math';
         enterMathCaptcha();
       }
@@ -1026,80 +997,72 @@ function handlePointer(px, py) {
     return false;
   }
 
-  // MATH stage interactions: DOM input handles it
-  if (stage === 'math') {
-    return false;
-  }
+  // MATH stage
+  if (stage === 'math') return false;
 
-  // CAMERA stage interactions
+  // CAMERA stage
   if (stage === 'camera') {
-
-    // If blue error screen is active, consume clicks; restart only when complete.
+    // Ending screen: block all interactions except restart once complete
     if (showBlueErrorScreen) {
       if (errorInfoProgress >= 100 && restartBtnBox) {
-        if (px >= restartBtnBox.x && px <= restartBtnBox.x + restartBtnBox.w &&
-            py >= restartBtnBox.y && py <= restartBtnBox.y + restartBtnBox.h) {
+        let rb = restartBtnBox;
+        if (px >= rb.x && px <= rb.x + rb.w &&
+            py >= rb.y && py <= rb.y + rb.h) {
           location.reload();
-          return false;
         }
       }
       return false;
     }
 
-    // Check if clicking the verify button FIRST (before popups)
+    // Verify button
     if (window.verifyBtnBox) {
       let vb = window.verifyBtnBox;
-      if (px >= vb.x && px <= vb.x + vb.w &&
-          py >= vb.y && py <= vb.y + vb.h) {
+      if (px >= vb.x && px <= vb.x + vb.w && py >= vb.y && py <= vb.y + vb.h) {
         handleVerifyButtonClick();
         return false;
       }
     }
 
-    // Check if clicking any popup close buttons (check in reverse order - top popup first)
+    // Popup close buttons
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
       let dx = px - popup.closeBtn.x;
       let dy = py - popup.closeBtn.y;
       if (dx * dx + dy * dy <= popup.closeBtn.r * popup.closeBtn.r) {
-        // Close this popup
         popups.splice(i, 1);
         lastFeedbackAttempt = millis();
         return false;
       }
     }
 
-    // If clicked on any popup area (not close button), consume the click
+    // Popup body
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
       if (px >= popup.box.x && px <= popup.box.x + popup.box.w &&
           py >= popup.box.y && py <= popup.box.y + popup.box.h) {
-        return false; // click consumed by popup
+        return false;
       }
     }
 
-    // grid tap to scramble and highlight specific cell
+    // Grid tap
     if (lastGridBox) {
       if (px >= lastGridBox.x && px <= lastGridBox.x + lastGridBox.size &&
           py >= lastGridBox.y && py <= lastGridBox.y + lastGridBox.size) {
 
-        // Mark that user has interacted - this triggers popup system
         if (!userInteracted) {
           userInteracted = true;
-          feedbackStartMillis = millis(); // Reset timer when first interaction happens
+          feedbackStartMillis = millis();
         }
 
-        // compute which cell
         let localX = px - lastGridBox.x;
         let localY = py - lastGridBox.y;
         let cellSize = lastGridBox.size / gridCols;
         let c = floor(constrain(localX / cellSize, 0, gridCols - 1));
         let r = floor(constrain(localY / cellSize, 0, gridRows - 1));
         let idx = r * gridCols + c;
-        // set highlight
+
         highlightedCell = idx;
         highlightStart = millis();
-        // scramble
         scrambleMapping();
         return false;
       }
@@ -1138,15 +1101,11 @@ function arraysEqual(a, b) {
 
 /* ------------------ BLACKOUT SQUARES ------------------ */
 function updateBlackoutSquares() {
-  // Pick 1-3 random squares to black out
-  let count = floor(random(1, 4)); // 1, 2, or 3 squares
+  let count = floor(random(1, 4));
   blackoutSquares = [];
   let available = [];
-  for (let i = 0; i < gridCols * gridRows; i++) {
-    available.push(i);
-  }
+  for (let i = 0; i < gridCols * gridRows; i++) available.push(i);
 
-  // Shuffle and pick
   for (let i = 0; i < count; i++) {
     if (available.length === 0) break;
     let idx = floor(random(available.length));
@@ -1160,48 +1119,37 @@ function assignTileEffects() {
   tileEffects = [];
   tileSeeds = [];
   for (let i = 0; i < gridCols * gridRows; i++) {
-    // pick one of the four effects to ensure variety (not including blackout in initial assignment)
-    let pick = floor(random(1, 5)); // 1..4 (scanlines, noise, pixelate, blur)
+    let pick = floor(random(1, 5)); // 1..4
     tileEffects.push(pick);
     tileSeeds.push(random(1000));
   }
-
-  // Initialize blackout squares (start with some in stage 3+)
   updateBlackoutSquares();
 }
 
-// apply effect to a tile image then draw into destination rect (dx,dy,w,h)
-// effect codes: 1 scanlines, 2 noise, 3 pixelate, 4 blur
-// intensity: 0.0..1.0
 function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
-  // cap processing size for performance
   const pMax = 160;
   let pW = min(tileImg.width, pMax);
   let pH = min(tileImg.height, pMax);
 
   if (effect === 1) {
-    // scanlines: draw tile then overlay lines with alpha proportional to intensity
     image(tileImg, dx, dy, w, h);
     push();
     noStroke();
-    let alpha = lerp(30, 160, intensity); // stronger alpha with intensity
+    let alpha = lerp(30, 160, intensity);
     fill(0, 0, 0, alpha * 0.6);
-    let spacing = lerp(12, 4, intensity); // closer lines when stronger
+    let spacing = lerp(12, 4, intensity);
     let offset = (millis() * 0.02 + seed) % spacing;
-    for (let y = dy + offset; y < dy + h; y += spacing) {
-      rect(dx, y, w, spacing * 0.35);
-    }
+    for (let y = dy + offset; y < dy + h; y += spacing) rect(dx, y, w, spacing * 0.35);
     pop();
     return;
   }
 
   if (effect === 2) {
-    // noise overlay: draw tile then scatter noise pixels/rects
     image(tileImg, dx, dy, w, h);
     push();
     noStroke();
-    let density = lerp(0.02, 0.12, intensity); // fraction of area that gets noisy dots
-    let count = floor(w * h * density / 400); // scale to reasonable count
+    let density = lerp(0.02, 0.12, intensity);
+    let count = floor(w * h * density / 400);
     for (let i = 0; i < count; i++) {
       let nx = random(dx, dx + w);
       let ny = random(dy, dy + h);
@@ -1209,7 +1157,6 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
       let a = random(40, 160) * intensity;
       fill(0, 0, 0, a);
       rect(nx, ny, s, s);
-      // occasional white speck
       if (random() < 0.15 * intensity) {
         fill(255, 255, 255, a * 0.6);
         rect(nx + random(-1, 1), ny + random(-1, 1), s * 0.5, s * 0.5);
@@ -1220,16 +1167,13 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
   }
 
   if (effect === 3) {
-    // pixelate: draw via a small buffer then scale up
-    // degree: higher intensity => smaller buffer => stronger pixelation
-    let pixelFactor = lerp(0.3, 0.06, intensity); // fraction of source resolution
+    let pixelFactor = lerp(0.3, 0.06, intensity);
     let smallW = max(8, floor(pW * pixelFactor));
     let smallH = max(8, floor(pH * pixelFactor));
     let g = createGraphics(smallW, smallH);
     g.imageMode(CORNER);
     g.noStroke();
     g.image(tileImg, 0, 0, smallW, smallH);
-    // optional slight color shift for stronger intensity
     if (intensity > 0.6) {
       g.loadPixels();
       for (let i = 0; i < g.pixels.length; i += 4) {
@@ -1239,28 +1183,23 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
       }
       g.updatePixels();
     }
-    // draw scaled up to destination
     image(g, dx, dy, w, h);
     g.remove();
     return;
   }
 
   if (effect === 4) {
-    // blur: process on downscaled buffer and filter BLUR with radius based on intensity
     let g = createGraphics(pW, pH);
     g.imageMode(CORNER);
     g.noStroke();
     g.image(tileImg, 0, 0, pW, pH);
-    // blur radius range
     let radius = lerp(1.0, 6.0, intensity);
-    // p5's filter(BLUR, r) accepts small r values
     g.filter(BLUR, radius);
     image(g, dx, dy, w, h);
     g.remove();
     return;
   }
 
-  // default fallback
   image(tileImg, dx, dy, w, h);
 }
 
