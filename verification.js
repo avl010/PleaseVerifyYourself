@@ -1,15 +1,42 @@
 let capture;
 let started = false;
 
-// Stage: 'consent' | 'math' | 'camera'
-let stage = 'consent';
+// stage: 'wheel' | 'claim' | 'consent' | 'math' | 'camera'
+let stage = 'wheel';
 
-// Consent UI state
+// consent UI state
 let consentChecked = false;
 let consentBox = { x: 0, y: 0, size: 0 };
 let continueBtnBox = { x: 0, y: 0, w: 0, h: 0 };
 
-// Math captcha state
+// prize wheel / claim state
+const WHEEL_PRIZES = [
+  "Mystery Prize",
+  "Free Gift",
+  "Try Again",
+  "Bonus Spin",
+  "Jackpot",
+  "Bonus Prize"
+];
+
+let wheelAngle = 0;
+let wheelSpinning = false;
+let wheelResultIndex = null;
+let claimedPrizeLabel = "";
+let spinBtnBox = null;
+let claimBtnBox = null;
+let plannedResultIndex = null;
+let spinStartAngle = 0;
+let spinProgress = 0;
+let spinDuration = 150; 
+let spinTurns = 6;
+
+// confetti effect
+let confetti = [];
+let confettiPlaying = false;
+let confettiStartTime = 0;
+
+// math captcha state
 let mathProblem = { num1: 0, num2: 0, operator: '+', answer: 0 };
 let mathInput = null; // p5.Element
 let mathSubmitBtn = null; // p5.Element
@@ -80,39 +107,35 @@ const TEXT_COLOR = '#ffffff';
 // This matches your test HTML background
 const BSOD_BLUE = '#0037DA';
 
-/* Non-repeating feedback picker state (for stages 0–4) */
-let feedbackBagByStage = {};     // stageIndex -> array of remaining message indices
-let lastFeedbackMsgByStage = {}; // stageIndex -> last message string (to avoid immediate repeat on reshuffle)
-
 const FEEDBACK_BY_STAGE = [
   [
     "Please position your face inside the grid.",
+    "Please fix your hair.",
+    "Hold still for a moment."
+  ],
+  [
     "Ensure proper lighting for verification.",
-    "Make sure your face is visible to the camera."
-  ],
-  [
-    "Move a little closer to the camera.",
     "Center your face in the frame.",
-    "Remove anything covering your face."
+    "Remove any obstructions."
   ],
   [
-    "Stop moving.",
-    "Try fixing your hair.",
+    "Face is unclear. Move towards better lighting.",
+    "You're too far away, move closer to the camera.",
     "Fix your posture."
   ],
   [
     "Is something wrong with your face?",
-    "I can't seem to verify you. You look strange from this angle.",
-    "You look tired. Open your eyes more."
+    "I can't seem to verify you. Look straight at me.",
+    "Try smiling."
   ],
   [
-    "You could at least try to look more presentable.",
-    "Why do you look like that?",
-    "Your expression seems off. You’d look better if you smiled."
+    "Why can't I see you clearly?",
+    "Your face seems off.",
+    "Stop moving around."
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
-    "Is something wrong with your face? Your face seems weird.",
+    "Your face seems weird. Why do you look like that?",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
@@ -134,6 +157,18 @@ function setup() {
 
 function draw() {
   background(255);
+
+  if (stage === 'wheel') {
+    drawPrizeWheelUI();
+    lastGridBox = null;
+    return;
+  }
+
+  if (stage === 'claim') {
+    drawClaimUI();
+    lastGridBox = null;
+    return;
+  }
 
   if (stage === 'consent') {
     drawConsentUI();
@@ -316,51 +351,290 @@ function draw() {
   if (userInteracted) manageFeedback(topBarH, stageIndex);
 }
 
-/* ------------------ NON-REPEATING FEEDBACK PICKER ------------------ */
-function resetFeedbackBagForStage(stageIndex) {
-  const pool = FEEDBACK_BY_STAGE[stageIndex] || [];
-  feedbackBagByStage[stageIndex] = pool.map((_, i) => i);
+/* ------------------ PRIZE WHEEL + CLAIM UI ------------------ */
+function startPrizeWheelSpin() {
+  if (wheelSpinning) return;
 
-  // shuffle
-  for (let i = feedbackBagByStage[stageIndex].length - 1; i > 0; i--) {
-    const j = floor(random(i + 1));
-    [feedbackBagByStage[stageIndex][i], feedbackBagByStage[stageIndex][j]] =
-      [feedbackBagByStage[stageIndex][j], feedbackBagByStage[stageIndex][i]];
-  }
+  const mysteryIndex = WHEEL_PRIZES.indexOf("Mystery Prize");
+  plannedResultIndex = mysteryIndex >= 0 ? mysteryIndex : 0;
+
+  spinStartAngle = wheelAngle;
+  spinProgress = 0;
+
+  spinDuration = floor(random(80, 115));
+  spinTurns = floor(random(4, 7));
+
+  wheelSpinning = true;
 }
 
-function pickNonRepeatingFeedback(stageIndex) {
-  const pool = FEEDBACK_BY_STAGE[stageIndex] || [];
-  if (pool.length === 0) return "";
+function drawPrizeWheelUI() {
+  background(250);
 
-  // Only enforce non-repeat for stages 0–4
-  if (stageIndex > 4) {
-    return pool[floor(random(pool.length))];
-  }
+  // Title
+  push();
+  fill(20);
+  textAlign(CENTER, TOP);
+  textStyle(BOLD);
+  textSize(28);
+  text("Spin to Win", width / 2, 28);
+  textStyle(NORMAL);
+  textSize(14);
+  fill(80);
+  text("Tap SPIN to reveal your prize.", width / 2, 66);
+  pop();
 
-  if (!feedbackBagByStage[stageIndex] || feedbackBagByStage[stageIndex].length === 0) {
-    resetFeedbackBagForStage(stageIndex);
-  }
+  // Wheel geometry
+  const cx = width / 2;
+  const cy = height / 2 - 20;
+  const radius = min(width, height) * 0.30;
+  const wedges = WHEEL_PRIZES.length;
+  const step = TWO_PI / wedges;
 
-  // pop next index
-  let idx = feedbackBagByStage[stageIndex].pop();
-  let msg = pool[idx];
+  // Spin animation
+  if (wheelSpinning) {
 
-  // avoid immediate repeat across reshuffles (rare)
-  if (pool.length > 1 && msg === lastFeedbackMsgByStage[stageIndex]) {
-    if (feedbackBagByStage[stageIndex].length > 0) {
-      const idx2 = feedbackBagByStage[stageIndex].pop();
-      feedbackBagByStage[stageIndex].unshift(idx);
-      idx = idx2;
-      msg = pool[idx];
+    const targetAngle = -HALF_PI - (plannedResultIndex * step + step / 2);
+
+    spinProgress = min(1, spinProgress + 1 / spinDuration);
+
+    // easeOutCubic easing
+    const t = 1 - pow(1 - spinProgress, 3);
+
+    const endAngle = targetAngle + TWO_PI * spinTurns;
+
+    wheelAngle = lerp(spinStartAngle, endAngle, t);
+
+    if (spinProgress >= 1) {
+      wheelSpinning = false;
+
+      wheelResultIndex = plannedResultIndex;
+      claimedPrizeLabel = WHEEL_PRIZES[wheelResultIndex];
+
+      stage = "claim";
+      spawnConfetti();
     }
   }
 
-  lastFeedbackMsgByStage[stageIndex] = msg;
-  return msg;
+  // Draw wheel
+  push();
+  translate(cx, cy);
+  rotate(wheelAngle);
+  noStroke();
+
+  for (let i = 0; i < wedges; i++) {
+    const start = i * step;
+
+    fill(i % 2 === 0 ? "#ffcc00" : "#5999ff");
+    arc(0, 0, radius * 2, radius * 2, start, start + step, PIE);
+
+    // Label
+    push();
+
+    const mid = start + step / 2;
+
+    rotate(mid);
+
+    const labelRadius = radius * 0.60;
+    translate(labelRadius, 0);
+
+    if (mid > HALF_PI && mid < 3 * HALF_PI) {
+      rotate(PI);
+    }
+
+    const label = WHEEL_PRIZES[i];
+
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+
+    let fs = 16;
+    textSize(fs);
+
+    const maxWidth = radius * 0.55;
+
+    while (textWidth(label) > maxWidth && fs > 9) {
+      fs--;
+      textSize(fs);
+    }
+
+    fill(30);
+    text(label, 0, 0);
+
+    pop();
+  }
+
+  // Center cap
+  fill(255);
+  circle(0, 0, radius * 0.25);
+
+  fill(30);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(12);
+  text("WIN", 0, 0);
+
+  pop();
+
+  // Pointer (top pointing down)
+  push();
+  fill(30);
+  noStroke();
+
+  triangle(
+    cx,
+    cy - radius + 4,
+    cx - 12,
+    cy - radius - 18,
+    cx + 12,
+    cy - radius - 18
+  );
+
+  pop();
+
+  // Spin button
+  const btnW = 180;
+  const btnH = 50;
+  const btnX = width / 2 - btnW / 2;
+  const btnY = height - btnH - 40;
+
+  spinBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+  push();
+  fill(wheelSpinning ? 180 : 26, wheelSpinning ? 180 : 115, wheelSpinning ? 180 : 232);
+  noStroke();
+  rect(btnX, btnY, btnW, btnH, 10);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(18);
+  text(wheelSpinning ? "SPINNING..." : "SPIN", btnX + btnW / 2, btnY + btnH / 2);
+  pop();
+}
+
+function spawnConfetti() {
+
+  confetti = [];
+  confettiPlaying = true;
+  confettiStartTime = millis();
+
+  for (let i = 0; i < 150; i++) {
+    confetti.push({
+      x: random(width),
+      y: random(-100, -20),
+      vx: random(-2, 2),
+      vy: random(3, 7),
+      size: random(6, 10),
+      rot: random(TWO_PI),
+      vr: random(-0.2, 0.2),
+      g: 0.08
+    });
+  }
+
+}
+
+function drawConfetti() {
+
+  if (!confettiPlaying) return;
+
+  const elapsed = millis() - confettiStartTime;
+
+  if (elapsed > 2000) {
+    confettiPlaying = false;
+    return;
+  }
+
+  push();
+  noStroke();
+
+  for (let p of confetti) {
+
+    p.vy += p.g;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rot += p.vr;
+
+    push();
+    translate(p.x, p.y);
+    rotate(p.rot);
+    fill(random(255), random(255), random(255));
+    rectMode(CENTER);
+    rect(0, 0, p.size, p.size);
+    pop();
+
+  }
+
+  pop();
+}
+
+function drawClaimUI() {
+  background(250);
+
+  const w = constrain(round(min(width * 0.86, 520)), 320, 520);
+  const h = constrain(round(min(height * 0.45, 340)), 220, 360);
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+
+  // Card
+  push();
+  fill(WHITE);
+  stroke(200);
+  rect(x, y, w, h, 10);
+  pop();
+
+  // Header
+  push();
+  noStroke();
+  fill(20);
+  textAlign(CENTER, TOP);
+  textStyle(BOLD);
+  textSize(22);
+  text("Congratulations!", x + w / 2, y + 22);
+
+  textStyle(NORMAL);
+  textSize(14);
+  fill(70);
+  text("You won:", x + w / 2, y + 66);
+
+  textStyle(BOLD);
+  textSize(24);
+  fill(0);
+  text(claimedPrizeLabel || "Mystery Prize", x + w / 2, y + 92);
+  pop();
+
+  // Disclaimer
+  push();
+  noStroke();
+  fill(90);
+  textAlign(LEFT, TOP);
+  textSize(13);
+  text(
+    "To prevent fraud and automated claims, verification is required before you can access your prize.",
+    x + 22, y + 140, w - 44
+  );
+  pop();
+
+  // Claim button
+  const btnW = min(240, w - 44);
+  const btnH = 48;
+  const btnX = x + (w - btnW) / 2;
+  const btnY = y + h - btnH - 22;
+  claimBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+  push();
+  fill(BLUE);
+  noStroke();
+  rect(btnX, btnY, btnW, btnH, 10);
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(18);
+  text("CLAIM PRIZE", btnX + btnW / 2, btnY + btnH / 2);
+  pop();
+  drawConfetti();
 }
 
 /* ------------------ ENDING (centered, like your test HTML) ------------------ */
+
 function startAndDrawBlueErrorScreen() {
   if (!showBlueErrorScreen) {
     showBlueErrorScreen = true;
@@ -381,7 +655,6 @@ function drawBlueErrorScreenCentered(progressPct) {
   noStroke();
   fill(BSOD_BLUE);
   rect(0, 0, width, height);
-  textFont('Consolas, "Courier New", monospace');
 
   // Centered content block
   const panelW = min(width * 0.86, 820);
@@ -389,7 +662,7 @@ function drawBlueErrorScreenCentered(progressPct) {
   const panelX = (width - panelW) / 2;
   const panelY = (height - panelH) / 2;
 
-  // subtle darker overlay
+  // subtle darker overlay to give it a centered look (like your test page)
   fill(0, 0, 0, 18);
   rect(panelX, panelY, panelW, panelH, 2);
 
@@ -423,14 +696,9 @@ function drawBlueErrorScreenCentered(progressPct) {
 
   y += 54;
   text(
-    "We're just collecting some error info, and then you can restart the process.",
+    "We're just collecting some error info, and then we'll restart for you.",
     x, y, maxW
   );
-
-  y += 54;
-  textStyle(BOLD);
-  textSize(18);
-  text("Stop Code: HUMAN_VERIFICATION_FAILED", x, y, maxW);
 
   // Progress
   y += 66;
@@ -729,7 +997,6 @@ function handleMathSubmit() {
     capture = createCapture({ audio: false, video: { facingMode: "user" } });
     capture.hide();
 
-    // initialize feedback timers
     feedbackStartMillis = millis();
     lastFeedbackAttempt = millis();
     popups = [];
@@ -738,15 +1005,15 @@ function handleMathSubmit() {
     lastPopupSpawn = millis();
     userInteracted = false;
 
-    // reset ending screen state
     showBlueErrorScreen = false;
     errorInfoProgress = 0;
     errorInfoStartTime = 0;
     restartBtnBox = null;
 
-    // reset non-repeat feedback state
-    feedbackBagByStage = {};
-    lastFeedbackMsgByStage = {};
+    // reset verify button vibe
+    verifyButtonClicks = 0;
+    verifyButtonMessage = 'verifying';
+    verifyButtonMessageTime = 0;
   } else {
     mathAttempts++;
     mathMsg = "Incorrect answer. Try again.";
@@ -760,6 +1027,7 @@ function handleMathSubmit() {
 }
 
 /* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
+
 function drawTopBar(topBarH) {
   fill(BLUE);
   rect(0, 0, width, topBarH);
@@ -790,17 +1058,17 @@ function drawTopBar(topBarH) {
 function manageFeedback(topBarH, stageIndex) {
   if (!feedbackStartMillis) feedbackStartMillis = millis();
 
-  // Stage 5+: multiple popups (chaotic)
   if (stageIndex >= 5) {
     if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_6) {
-      let message = pickNonRepeatingFeedback(stageIndex);
+      let pool = FEEDBACK_BY_STAGE[stageIndex];
+      let message = pool[floor(random(pool.length))];
       createAndAddPopup(message, topBarH, true);
       lastPopupSpawn = millis();
     }
   } else {
-    // Stages 0-4: single popup, non-repeating until exhausted
     if (popups.length === 0 && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
-      let message = pickNonRepeatingFeedback(stageIndex);
+      let pool = FEEDBACK_BY_STAGE[stageIndex];
+      let message = pool[floor(random(pool.length))];
       createAndAddPopup(message, topBarH, false);
       lastFeedbackAttempt = millis();
     }
@@ -979,6 +1247,54 @@ function touchStarted() { return handlePointer(mouseX, mouseY); }
 function mousePressed() { return handlePointer(mouseX, mouseY); }
 
 function handlePointer(px, py) {
+
+  // WHEEL stage
+  if (stage === 'wheel') {
+    if (!wheelSpinning && spinBtnBox &&
+        px >= spinBtnBox.x && px <= spinBtnBox.x + spinBtnBox.w &&
+        py >= spinBtnBox.y && py <= spinBtnBox.y + spinBtnBox.h) {
+        startPrizeWheelSpin();   // start the controlled spin
+        wheelResultIndex = null;
+        return false;
+      }
+    return false;
+  }
+
+  // CLAIM stage
+  if (stage === 'claim') {
+    if (claimBtnBox &&
+        px >= claimBtnBox.x && px <= claimBtnBox.x + claimBtnBox.w &&
+        py >= claimBtnBox.y && py <= claimBtnBox.y + claimBtnBox.h) {
+
+      // Route into verification flow
+      stage = 'consent';
+      consentChecked = false;
+
+      // Reset verification-related state
+      popups = [];
+      userInteracted = false;
+      feedbackStartMillis = 0;
+      lastFeedbackAttempt = millis();
+
+      showBlueErrorScreen = false;
+      errorInfoProgress = 0;
+      errorInfoStartTime = 0;
+      restartBtnBox = null;
+
+      // If math inputs exist for some reason, remove them
+      // (Usually they won't exist yet, but safe)
+      if (mathInput || mathSubmitBtn) removeMathElements();
+
+      // Reset verify button state
+      verifyButtonClicks = 0;
+      verifyButtonMessage = 'verifying';
+      verifyButtonMessageTime = 0;
+
+      return false;
+    }
+    return false;
+  }
+
   // CONSENT stage
   if (stage === 'consent') {
     if (consentBox && px >= consentBox.x && px <= consentBox.x + consentBox.size &&
@@ -1078,6 +1394,7 @@ function handlePointer(px, py) {
 
   return false;
 }
+
 
 /* ------------------ MAPPING / SCRAMBLING ------------------ */
 function initMapping() {
