@@ -426,6 +426,11 @@ function drawBlueErrorScreenCentered(progressPct) {
     x, y, maxW
   );
 
+  y += 54;
+  textStyle(BOLD);
+  textSize(18);
+  text("Stop Code: HUMAN_VERIFICATION_FAILED", x, y, maxW);
+
   // Progress
   y += 66;
   textStyle(BOLD);
