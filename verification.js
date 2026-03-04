@@ -110,32 +110,32 @@ const BSOD_BLUE = '#0037DA';
 const FEEDBACK_BY_STAGE = [
   [
     "Please position your face inside the grid.",
-    "Please fix your hair.",
-    "Hold still for a moment."
-  ],
-  [
     "Ensure proper lighting for verification.",
-    "Center your face in the frame.",
-    "Remove any obstructions."
+    "Make sure your face is visible to the camera."
   ],
   [
-    "Face is unclear. Move towards better lighting.",
-    "You're too far away, move closer to the camera.",
+    "Move a little closer to the camera.",
+    "Center your face in the frame.",
+    "Remove anything covering your face."
+  ],
+  [
+    "Stop moving.",
+    "Try fixing your hair.",
     "Fix your posture."
   ],
   [
     "Is something wrong with your face?",
-    "I can't seem to verify you. Look straight at me.",
-    "Try smiling."
+    "I can't seem to verify you. You look strange from this angle.",
+    "You look tired. Open your eyes more."
   ],
   [
-    "Why can't I see you clearly?",
-    "Your face seems off.",
-    "Stop moving around."
+    "You could at least try to look more presentable.",
+    "Why do you look like that?",
+    "Your expression seems off. You’d look better if you smiled."
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
-    "Your face seems weird. Why do you look like that?",
+    "Is something wrong with your face? Your face seems weird.",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
@@ -655,6 +655,7 @@ function drawBlueErrorScreenCentered(progressPct) {
   noStroke();
   fill(BSOD_BLUE);
   rect(0, 0, width, height);
+  textFont('Consolas, "Courier New", monospace');
 
   // Centered content block
   const panelW = min(width * 0.86, 820);
