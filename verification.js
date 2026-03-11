@@ -28,7 +28,7 @@ let claimBtnBox = null;
 let plannedResultIndex = null;
 let spinStartAngle = 0;
 let spinProgress = 0;
-let spinDuration = 150; 
+let spinDuration = 150;
 let spinTurns = 6;
 
 // confetti effect
@@ -38,8 +38,8 @@ let confettiStartTime = 0;
 
 // math captcha state
 let mathProblem = { num1: 0, num2: 0, operator: '+', answer: 0 };
-let mathInput = null; // p5.Element
-let mathSubmitBtn = null; // p5.Element
+let mathInput = null; 
+let mathSubmitBtn = null; 
 let mathMsg = ''; // feedback for wrong attempts
 let mathAttempts = 0;
 
@@ -49,64 +49,159 @@ let mapping = [];
 let originalMapping = [];
 let buffer = null;
 
-/* feedback timing & content */
+// feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation every 20s
-const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup every 7s
-let lastFeedbackAttempt = 0; // last time we attempted to show a popup
-let userInteracted = false; // track if user has clicked on grid
+const FEEDBACK_STAGE_DURATION_MS = 1600;
+const FEEDBACK_CHANGE_MS = 6000;
+let lastFeedbackAttempt = 0;
+let userInteracted = false; 
 
-/* Popup state - now supports multiple popups in stage 6 */
+// popup state
 let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
 
-/* Verify button state */
+// verify button state
 let verifyButtonClicks = 0;
 let verifyButtonMessage = 'verifying';
 let verifyButtonMessageTime = 0;
-const VERIFY_BUTTON_MESSAGE_DURATION = 2000; // 2 seconds
+const VERIFY_BUTTON_MESSAGE_DURATION = 2000;
 
-/* Stage 7: Blue error screen takeover */
+// stage 7: blue error screen
 let showBlueErrorScreen = false;
-let errorInfoProgress = 0; // 0..100
+let errorInfoProgress = 0;
 let errorInfoStartTime = 0;
-const ERROR_INFO_DURATION = 12000; // ms to reach 100%
+const ERROR_INFO_DURATION = 12000; 
 let restartBtnBox = null;
 
-/* grid hit test info (updated in draw) */
-let lastGridBox = null; // { x, y, size }
+// grid hit test info
+let lastGridBox = null;
 
-/* Highlight state for tapped square */
+// highlight state for tapped square
 let highlightedCell = -1;
 let highlightStart = 0;
-const HIGHLIGHT_DURATION = 400; // ms
+const HIGHLIGHT_DURATION = 400;
 const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA
 
-/* Visual corruption effects (start at feedback stage 3, stronger at stage 4+) */
+// visual corruption effects (start at feedback stage 3, stronger at stage 4+)
 let effectsAssigned = false;
 let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur
-let tileSeeds = []; // per-tile random seeds for animation
+let tileSeeds = []; 
 
-/* Blackout squares state */
+// blackout squares state
 let blackoutSquares = []; // array of indices that are blacked out
 let lastBlackoutChange = 0;
 const BLACKOUT_CHANGE_INTERVAL = 2000; // change blackout pattern every 2s in stage 5+
 
-/* Auto-scramble for stage 5+ */
+// Auto-scramble for stage 5+
 let lastAutoScramble = 0;
-const AUTO_SCRAMBLE_INTERVAL = 3000; // auto-scramble every 3s in stage 5+
+const AUTO_SCRAMBLE_INTERVAL = 3000;
 
-/* Multiple popups for stage 6 */
-const MAX_POPUPS_STAGE_6 = 4; // maximum simultaneous popups in stage 6
+// Multiple popups for stage 6
+const MAX_POPUPS_STAGE_6 = 5;
 let lastPopupSpawn = 0;
-const POPUP_SPAWN_INTERVAL = 1200; // spawn new popup every 1.2s in stage 6
+const POPUP_SPAWN_INTERVAL = 1200;
 
 const BLUE = '#1a73e8';
 const WHITE = '#ffffff';
 const TEXT_COLOR = '#ffffff';
-
-// This matches your test HTML background
 const BSOD_BLUE = '#0037DA';
 
+// ui (windows 95/98 inspired)
+const UI95 = {
+  bg: '#C0C0C0',
+  panel: '#C0C0C0',
+  face: '#DFDFDF',
+  shadow: '#808080',
+  dark: '#404040',
+  highlight: '#FFFFFF',
+  text: '#000000',
+  title: '#000080',
+  titleText: '#FFFFFF'
+};
+
+function ui95SetFont() {
+  textFont('MS Sans Serif, Tahoma, Verdana, Arial, sans-serif');
+}
+
+function ui95BevelRect(x, y, w, h, inset = false) {
+  noStroke();
+  fill(UI95.panel);
+  rect(x, y, w, h);
+
+  const tl = inset ? UI95.shadow : UI95.highlight;
+  const br = inset ? UI95.highlight : UI95.shadow;
+  const inner = inset ? UI95.dark : UI95.face;
+
+  strokeWeight(1);
+
+  // outer
+  stroke(tl);
+  line(x, y, x + w - 1, y); // top
+  line(x, y, x, y + h - 1); // left
+
+  stroke(br);
+  line(x, y + h - 1, x + w - 1, y + h - 1); // bottom
+  line(x + w - 1, y, x + w - 1, y + h - 1); // right
+
+  // inner
+  stroke(inner);
+  line(x + 1, y + 1, x + w - 2, y + 1);
+  line(x + 1, y + 1, x + 1, y + h - 2);
+  stroke(UI95.dark);
+  line(x + 1, y + h - 2, x + w - 2, y + h - 2);
+  line(x + w - 2, y + 1, x + w - 2, y + h - 2);
+}
+
+function ui95TitleBar(x, y, w, h, title) {
+  noStroke();
+  fill(UI95.title);
+  rect(x, y, w, h);
+
+  fill(UI95.titleText);
+  textAlign(LEFT, CENTER);
+  textStyle(BOLD);
+  textSize(13);
+  text(title, x + 8, y + h / 2);
+  textStyle(NORMAL);
+}
+
+function ui95Button(box, label, pressed = false) {
+  push();
+  ui95SetFont();
+
+  noStroke();
+  fill(pressed ? '#B0B0B0' : UI95.panel);
+  rect(box.x, box.y, box.w, box.h);
+
+  ui95BevelRect(box.x, box.y, box.w, box.h, pressed);
+
+  fill(UI95.text);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(13);
+  const ox = pressed ? 1 : 0;
+  const oy = pressed ? 1 : 0;
+  text(label, box.x + box.w / 2 + ox, box.y + box.h / 2 + oy);
+  pop();
+}
+
+function ui95Panel(x, y, w, h, title) {
+  push();
+  ui95SetFont();
+
+  ui95BevelRect(x, y, w, h, false);
+
+  const titleH = 22;
+  ui95TitleBar(x + 2, y + 2, w - 4, titleH, title);
+
+  noStroke();
+  fill('#EFEFEF');
+  rect(x + 4, y + 2 + titleH + 2, w - 8, h - (titleH + 8));
+  pop();
+
+  return { titleH };
+}
+
+// feedback messages popups
 const FEEDBACK_BY_STAGE = [
   [
     "Please position your face inside the grid.",
@@ -182,24 +277,21 @@ function draw() {
     return;
   }
 
-  // CAMERA stage
+  // camera stage
   let topBarH = constrain(round(height * 0.16), 80, 160);
   drawTopBar(topBarH);
 
-  // Determine current feedback stage index (for effects activation and intensity)
   if (!feedbackStartMillis) feedbackStartMillis = millis();
   let elapsed = millis() - feedbackStartMillis;
   let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
   stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
-  // ✅ Performance: once we hit the ending stage, draw ONLY the blue screen and stop.
   if (stageIndex >= 6 || showBlueErrorScreen) {
     startAndDrawBlueErrorScreen();
     lastGridBox = null;
     return;
   }
 
-  // If camera not ready, show loading
   if (!capture || !capture.elt || !capture.elt.videoWidth || !capture.elt.videoHeight) {
     fill(0);
     noStroke();
@@ -213,7 +305,6 @@ function draw() {
     return;
   }
 
-  // Draw camera 3x3 tiled
   let availableH = height - topBarH - 32;
   let maxSquare = min(width * 0.95, availableH * 0.95);
   let squareSize = maxSquare;
@@ -234,14 +325,12 @@ function draw() {
     buffer = createGraphics(videoSize, videoSize);
   }
 
-  // Render video to buffer (center-cropped square)
   buffer.push();
   buffer.clear();
   buffer.imageMode(CORNER);
   buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
   buffer.pop();
 
-  // When stageIndex >= 3, enable effects assignment (once)
   if (stageIndex >= 3 && !effectsAssigned) {
     assignTileEffects();
     effectsAssigned = true;
@@ -253,13 +342,11 @@ function draw() {
     blackoutSquares = [];
   }
 
-  // Intensity: subtle at stage 3-4, stronger at stage 5+
   let intensity = 0.0;
   if (stageIndex === 3) intensity = 0.3;
   if (stageIndex === 4) intensity = 0.6;
   if (stageIndex >= 5) intensity = 1.0;
 
-  // Stage 5+: auto-scramble and move blackout squares
   if (stageIndex >= 4) {
     if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
       scrambleMapping();
@@ -271,7 +358,6 @@ function draw() {
     }
   }
 
-  // Background card behind camera
   push();
   noStroke();
   fill(240);
@@ -279,7 +365,6 @@ function draw() {
   rect(xOffset - pad, yOffset - pad, squareSize + pad * 2, squareSize + pad * 2, 8);
   pop();
 
-  // Draw tiles from buffer (flip horizontally to mirror front camera)
   push();
   translate(xOffset + squareSize, yOffset);
   scale(-1, 1);
@@ -316,7 +401,6 @@ function draw() {
   }
   pop();
 
-  // Highlight tapped cell (if active)
   if (highlightedCell > -1) {
     let t = millis() - highlightStart;
     if (t <= HIGHLIGHT_DURATION) {
@@ -336,7 +420,6 @@ function draw() {
     }
   }
 
-  // Grid overlay
   stroke(200);
   strokeWeight(2);
   noFill();
@@ -351,7 +434,7 @@ function draw() {
   if (userInteracted) manageFeedback(topBarH, stageIndex);
 }
 
-/* ------------------ PRIZE WHEEL + CLAIM UI ------------------ */
+// prize wheel + claim
 function startPrizeWheelSpin() {
   if (wheelSpinning) return;
 
@@ -368,38 +451,42 @@ function startPrizeWheelSpin() {
 }
 
 function drawPrizeWheelUI() {
-  background(250);
+  background(UI95.bg);
+  ui95SetFont();
+  noSmooth();
 
-  // Title
+  const panelW = constrain(round(min(width * 0.92, 560)), 320, 560);
+  const panelH = constrain(round(min(height * 0.88, 640)), 420, 640);
+  const panelX = (width - panelW) / 2;
+  const panelY = (height - panelH) / 2;
+
+  ui95Panel(panelX, panelY, panelW, panelH, "Prize Center");
+
   push();
-  fill(20);
+  fill(0);
   textAlign(CENTER, TOP);
   textStyle(BOLD);
-  textSize(28);
-  text("Spin to Win", width / 2, 28);
+  textSize(18);
+  text("Spin to Win", panelX + panelW / 2, panelY + 34);
   textStyle(NORMAL);
-  textSize(14);
-  fill(80);
-  text("Tap SPIN to reveal your prize.", width / 2, 66);
+  textSize(12);
+  fill(40);
+  text("Tap SPIN to reveal your prize.", panelX + panelW / 2, panelY + 58);
   pop();
 
-  // Wheel geometry
-  const cx = width / 2;
-  const cy = height / 2 - 20;
-  const radius = min(width, height) * 0.30;
+  const cx = panelX + panelW / 2;
+  const cy = panelY + panelH * 0.50;
+  const radius = min(panelW, panelH) * 0.26;
+
   const wedges = WHEEL_PRIZES.length;
   const step = TWO_PI / wedges;
 
-  // Spin animation
   if (wheelSpinning) {
-
     const targetAngle = -HALF_PI - (plannedResultIndex * step + step / 2);
 
     spinProgress = min(1, spinProgress + 1 / spinDuration);
 
-    // easeOutCubic easing
     const t = 1 - pow(1 - spinProgress, 3);
-
     const endAngle = targetAngle + TWO_PI * spinTurns;
 
     wheelAngle = lerp(spinStartAngle, endAngle, t);
@@ -415,7 +502,6 @@ function drawPrizeWheelUI() {
     }
   }
 
-  // Draw wheel
   push();
   translate(cx, cy);
   rotate(wheelAngle);
@@ -427,58 +513,49 @@ function drawPrizeWheelUI() {
     fill(i % 2 === 0 ? "#ffcc00" : "#5999ff");
     arc(0, 0, radius * 2, radius * 2, start, start + step, PIE);
 
-    // Label
     push();
-
     const mid = start + step / 2;
-
     rotate(mid);
 
     const labelRadius = radius * 0.60;
     translate(labelRadius, 0);
 
-    if (mid > HALF_PI && mid < 3 * HALF_PI) {
-      rotate(PI);
-    }
+    if (mid > HALF_PI && mid < 3 * HALF_PI) rotate(PI);
 
     const label = WHEEL_PRIZES[i];
 
     textAlign(CENTER, CENTER);
     textStyle(BOLD);
 
-    let fs = 16;
+    let fs = 12;
     textSize(fs);
 
-    const maxWidth = radius * 0.55;
-
+    const maxWidth = radius * 0.70;
     while (textWidth(label) > maxWidth && fs > 9) {
       fs--;
       textSize(fs);
     }
 
-    fill(30);
+    fill(0);
     text(label, 0, 0);
-
     pop();
   }
 
-  // Center cap
-  fill(255);
-  circle(0, 0, radius * 0.25);
+  fill('#EFEFEF');
+  circle(0, 0, radius * 0.28);
 
-  fill(30);
+  fill(0);
   textAlign(CENTER, CENTER);
   textStyle(BOLD);
-  textSize(12);
+  textSize(11);
   text("WIN", 0, 0);
 
   pop();
 
-  // Pointer (top pointing down)
+// wheel pointer
   push();
-  fill(30);
+  fill(0);
   noStroke();
-
   triangle(
     cx,
     cy - radius + 4,
@@ -487,32 +564,18 @@ function drawPrizeWheelUI() {
     cx + 12,
     cy - radius - 18
   );
-
   pop();
 
-  // Spin button
   const btnW = 180;
-  const btnH = 50;
-  const btnX = width / 2 - btnW / 2;
-  const btnY = height - btnH - 40;
+  const btnH = 40;
+  const btnX = panelX + panelW / 2 - btnW / 2;
+  const btnY = panelY + panelH - btnH - 22;
 
   spinBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
-
-  push();
-  fill(wheelSpinning ? 180 : 26, wheelSpinning ? 180 : 115, wheelSpinning ? 180 : 232);
-  noStroke();
-  rect(btnX, btnY, btnW, btnH, 10);
-
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textStyle(BOLD);
-  textSize(18);
-  text(wheelSpinning ? "SPINNING..." : "SPIN", btnX + btnW / 2, btnY + btnH / 2);
-  pop();
+  ui95Button(spinBtnBox, wheelSpinning ? "SPINNING..." : "SPIN", false);
 }
 
 function spawnConfetti() {
-
   confetti = [];
   confettiPlaying = true;
   confettiStartTime = millis();
@@ -529,11 +592,10 @@ function spawnConfetti() {
       g: 0.08
     });
   }
-
 }
 
+// confetti at claim screen
 function drawConfetti() {
-
   if (!confettiPlaying) return;
 
   const elapsed = millis() - confettiStartTime;
@@ -547,7 +609,6 @@ function drawConfetti() {
   noStroke();
 
   for (let p of confetti) {
-
     p.vy += p.g;
     p.x += p.vx;
     p.y += p.vy;
@@ -560,81 +621,58 @@ function drawConfetti() {
     rectMode(CENTER);
     rect(0, 0, p.size, p.size);
     pop();
-
   }
 
   pop();
 }
 
 function drawClaimUI() {
-  background(250);
+  background(UI95.bg);
+  ui95SetFont();
+  noSmooth();
 
-  const w = constrain(round(min(width * 0.86, 520)), 320, 520);
-  const h = constrain(round(min(height * 0.45, 340)), 220, 360);
+  const w = constrain(round(min(width * 0.92, 560)), 320, 560);
+  const h = constrain(round(min(height * 0.60, 360)), 240, 360);
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  // Card
+  ui95Panel(x, y, w, h, "Claim Prize");
+
   push();
-  fill(WHITE);
-  stroke(200);
-  rect(x, y, w, h, 10);
-  pop();
-
-  // Header
-  push();
-  noStroke();
-  fill(20);
-  textAlign(CENTER, TOP);
-  textStyle(BOLD);
-  textSize(22);
-  text("Congratulations!", x + w / 2, y + 22);
-
-  textStyle(NORMAL);
-  textSize(14);
-  fill(70);
-  text("You won:", x + w / 2, y + 66);
-
-  textStyle(BOLD);
-  textSize(24);
   fill(0);
-  text(claimedPrizeLabel || "Mystery Prize", x + w / 2, y + 92);
-  pop();
-
-  // Disclaimer
-  push();
-  noStroke();
-  fill(90);
   textAlign(LEFT, TOP);
   textSize(13);
+  textStyle(BOLD);
+  text("Result:", x + 18, y + 40);
+
+  textStyle(NORMAL);
+  textSize(13);
+  text(claimedPrizeLabel || "Mystery Prize", x + 80, y + 40);
+  pop();
+
+  push();
+  fill(40);
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(12);
   text(
     "To prevent fraud and automated claims, verification is required before you can access your prize.",
-    x + 22, y + 140, w - 44
+    x + 18, y + 70, w - 36
   );
   pop();
 
-  // Claim button
-  const btnW = min(240, w - 44);
-  const btnH = 48;
-  const btnX = x + (w - btnW) / 2;
-  const btnY = y + h - btnH - 22;
+  const btnW = 200;
+  const btnH = 40;
+  const btnX = x + w - btnW - 18;
+  const btnY = y + h - btnH - 18;
   claimBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
 
-  push();
-  fill(BLUE);
-  noStroke();
-  rect(btnX, btnY, btnW, btnH, 10);
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textStyle(BOLD);
-  textSize(18);
-  text("CLAIM PRIZE", btnX + btnW / 2, btnY + btnH / 2);
-  pop();
+  ui95Button(claimBtnBox, "CLAIM", false);
+
   drawConfetti();
 }
 
-/* ------------------ ENDING (centered, like your test HTML) ------------------ */
-
+// ending + blue error screen
 function startAndDrawBlueErrorScreen() {
   if (!showBlueErrorScreen) {
     showBlueErrorScreen = true;
@@ -651,13 +689,13 @@ function startAndDrawBlueErrorScreen() {
 function drawBlueErrorScreenCentered(progressPct) {
   push();
 
-  // Full-screen blue
+  // full-screen blue
   noStroke();
   fill(BSOD_BLUE);
   rect(0, 0, width, height);
   textFont('Consolas, "Courier New", monospace');
 
-  // Centered content block
+  // centered content block
   const panelW = min(width * 0.86, 820);
   const panelH = min(height * 0.70, 520);
   const panelX = (width - panelW) / 2;
@@ -675,7 +713,7 @@ function drawBlueErrorScreenCentered(progressPct) {
   fill(255);
   textAlign(LEFT, TOP);
 
-  // Header face
+  // header face
   textStyle(BOLD);
   textSize(38);
   text(":( ", x, y);
@@ -701,13 +739,13 @@ function drawBlueErrorScreenCentered(progressPct) {
     x, y, maxW
   );
 
-  // Progress
+  // progress
   y += 66;
   textStyle(BOLD);
   textSize(20);
   text(`${progressPct}% complete`, x, y);
 
-  // Bar
+  // bar
   y += 34;
   const barW = min(maxW, 520);
   const barH = 10;
@@ -719,7 +757,7 @@ function drawBlueErrorScreenCentered(progressPct) {
   fill(255);
   rect(x, y, (barW * progressPct) / 100, barH);
 
-  // Restart button (when complete)
+  // restart button (when complete)
   restartBtnBox = null;
   if (progressPct >= 100) {
     y += 54;
@@ -747,87 +785,75 @@ function drawBlueErrorScreenCentered(progressPct) {
   pop();
 }
 
-/* ------------------ CONSENT UI ------------------ */
+// bot-check captcha ui
 function drawConsentUI() {
-  const w = constrain(round(min(width * 0.85, 480)), 320, 480);
-  const h = constrain(round(min(height * 0.4, 320)), 200, 360);
+  background(UI95.bg);
+  ui95SetFont();
+  noSmooth();
+
+  const w = constrain(round(min(width * 0.92, 520)), 320, 520);
+  const h = constrain(round(min(height * 0.48, 300)), 220, 320);
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  push();
-  fill(WHITE);
-  stroke(200);
-  rect(x, y, w, h, 8);
-  pop();
+  ui95Panel(x, y, w, h, "Security Check");
 
   push();
-  noStroke();
   fill(0);
-  textAlign(CENTER, CENTER);
-  textSize(20);
+  textAlign(LEFT, TOP);
   textStyle(BOLD);
-  text("I'm not a robot", x + w / 2, y + 36);
+  textSize(13);
+  text("Human verification required.", x + 18, y + 40);
   textStyle(NORMAL);
+  textSize(12);
+  fill(40);
+  text("Please confirm to continue.", x + 18, y + 60);
   pop();
 
-  let cbSize = constrain(round(min(w * 0.06, 28)), 20, 28);
-  let cbX = x + 28;
-  let cbY = y + 80;
+  const cbSize = 20;
+  const cbX = x + 18;
+  const cbY = y + 98;
   consentBox = { x: cbX, y: cbY, size: cbSize };
 
   push();
-  fill(WHITE);
-  stroke(120);
-  rect(cbX, cbY, cbSize, cbSize, 4);
+  ui95BevelRect(cbX, cbY, cbSize, cbSize, true);
   if (consentChecked) {
-    noStroke();
-    fill(BLUE);
-    rect(cbX + 3, cbY + 3, cbSize - 6, cbSize - 6, 3);
-    fill(255);
-    noStroke();
-    textSize(cbSize * 0.6);
-    textAlign(CENTER, CENTER);
-    text('✓', cbX + cbSize / 2, cbY + cbSize / 2 + 1);
+    stroke(0);
+    strokeWeight(2);
+    line(cbX + 4, cbY + 10, cbX + 9, cbY + 15);
+    line(cbX + 9, cbY + 15, cbX + 16, cbY + 5);
   }
   pop();
 
   push();
-  noStroke();
   fill(0);
-  textAlign(LEFT, CENTER);
-  textSize(16);
-  let labelX = cbX + cbSize + 12;
-  let labelY = cbY + cbSize / 2;
-  text("I am not a robot", labelX, labelY);
-  pop();
-
-  push();
   noStroke();
-  fill(90);
-  textAlign(LEFT, TOP);
+  textAlign(LEFT, CENTER);
   textSize(13);
-  text("Please check the box and press Continue to begin verification.", x + 28, y + 120, w - 56);
+  text("I am not a robot", cbX + cbSize + 10, cbY + cbSize / 2);
   pop();
 
-  let btnW = constrain(round(w * 0.4), 120, w - 56);
-  let btnH = 44;
-  let btnX = x + w - btnW - 28;
-  let btnY = y + h - btnH - 24;
+  const btnW = 140;
+  const btnH = 40;
+  const btnX = x + w - btnW - 18;
+  const btnY = y + h - btnH - 18;
   continueBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
 
-  push();
-  if (consentChecked) fill(BLUE); else fill(200);
-  noStroke();
-  rect(btnX, btnY, btnW, btnH, 8);
-  fill(WHITE);
-  noStroke();
-  textAlign(CENTER, CENTER);
-  textSize(16);
-  text("Continue", btnX + btnW / 2, btnY + btnH / 2);
-  pop();
+  if (consentChecked) {
+    ui95Button(continueBtnBox, "Continue", false);
+  } else {
+    push();
+    ui95BevelRect(btnX, btnY, btnW, btnH, false);
+    fill('#A0A0A0');
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(13);
+    text("Continue", btnX + btnW / 2, btnY + btnH / 2);
+    pop();
+  }
 }
 
-/* ------------------ MATH CAPTCHA UI ------------------ */
+// math captcha ui
 function enterMathCaptcha() {
   generateMathProblem();
   mathMsg = '';
@@ -835,41 +861,50 @@ function enterMathCaptcha() {
 
   if (!mathInput) {
     mathInput = createInput('');
-    mathInput.attribute('placeholder', 'Enter answer');
+    mathInput.attribute('placeholder', 'Answer');
     mathInput.attribute('type', 'number');
-    mathInput.style('font-size', '16px');
-    mathInput.style('padding', '12px');
-    mathInput.style('border', '2px solid #ccc');
-    mathInput.style('border-radius', '4px');
-    mathInput.style('background', '#fff');
+
+    mathInput.style('font-family', 'Tahoma, Verdana, Arial, sans-serif');
+    mathInput.style('font-size', '14px');
+    mathInput.style('padding', '8px 10px');
+    mathInput.style('border', '2px solid #808080');
+    mathInput.style('border-top-color', '#404040');
+    mathInput.style('border-left-color', '#404040');
+    mathInput.style('border-right-color', '#FFFFFF');
+    mathInput.style('border-bottom-color', '#FFFFFF');
+    mathInput.style('border-radius', '0px');
+    mathInput.style('background', '#FFFFFF');
+    mathInput.style('color', '#000000');
     mathInput.style('z-index', '1000');
     mathInput.style('position', 'absolute');
-    mathInput.style('touch-action', 'manipulation');
-    mathInput.style('pointer-events', 'auto');
-    mathInput.style('-webkit-appearance', 'none');
     mathInput.style('box-sizing', 'border-box');
     mathInput.elt.autocomplete = 'off';
   }
+
   if (!mathSubmitBtn) {
-    mathSubmitBtn = createButton('Submit');
+    mathSubmitBtn = createButton('OK');
     mathSubmitBtn.mousePressed(handleMathSubmit);
     mathSubmitBtn.touchStarted(handleMathSubmit);
-    mathSubmitBtn.style('background-color', BLUE);
-    mathSubmitBtn.style('color', '#ffffff');
-    mathSubmitBtn.style('border', 'none');
-    mathSubmitBtn.style('padding', '12px 20px');
-    mathSubmitBtn.style('border-radius', '4px');
-    mathSubmitBtn.style('font-size', '16px');
+
+    mathSubmitBtn.style('font-family', 'Tahoma, Verdana, Arial, sans-serif');
+    mathSubmitBtn.style('font-size', '14px');
     mathSubmitBtn.style('font-weight', 'bold');
+    mathSubmitBtn.style('padding', '8px 14px');
+    mathSubmitBtn.style('border-radius', '0px');
+    mathSubmitBtn.style('border', '2px solid #C0C0C0');
+    mathSubmitBtn.style('border-top-color', '#FFFFFF');
+    mathSubmitBtn.style('border-left-color', '#FFFFFF');
+    mathSubmitBtn.style('border-right-color', '#808080');
+    mathSubmitBtn.style('border-bottom-color', '#808080');
+    mathSubmitBtn.style('background', '#C0C0C0');
+    mathSubmitBtn.style('color', '#000000');
     mathSubmitBtn.style('cursor', 'pointer');
     mathSubmitBtn.style('z-index', '1000');
     mathSubmitBtn.style('position', 'absolute');
-    mathSubmitBtn.style('touch-action', 'manipulation');
-    mathSubmitBtn.style('pointer-events', 'auto');
-    mathSubmitBtn.style('-webkit-tap-highlight-color', 'transparent');
-    mathSubmitBtn.style('height', '44px');
+    mathSubmitBtn.style('height', '40px');
     mathSubmitBtn.style('box-sizing', 'border-box');
   }
+
   positionMathElements();
   mathInput.elt.value = '';
 
@@ -898,24 +933,24 @@ function generateMathProblem() {
 }
 
 function positionMathElements() {
-  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
-  const h = constrain(round(min(height * 0.36, 280)), 200, 320);
+  const w = constrain(round(min(width * 0.92, 560)), 320, 560);
+  const h = constrain(round(min(height * 0.52, 320)), 240, 340);
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  const elementHeight = 44;
-  const bottomMargin = 24;
-  const gap = 12;
-  const buttonWidth = 100;
-  const inputWidth = w - buttonWidth - gap - 40;
+  const elementHeight = 40;
+  const bottomMargin = 18;
+  const gap = 10;
+  const buttonWidth = 90;
+  const inputWidth = w - buttonWidth - gap - 36;
 
   if (mathInput) {
-    mathInput.position(x + 20, y + h - bottomMargin - elementHeight);
+    mathInput.position(x + 18, y + h - bottomMargin - elementHeight);
     mathInput.size(inputWidth, elementHeight);
     mathInput.show();
   }
   if (mathSubmitBtn) {
-    mathSubmitBtn.position(x + 20 + inputWidth + gap, y + h - bottomMargin - elementHeight);
+    mathSubmitBtn.position(x + 18 + inputWidth + gap, y + h - bottomMargin - elementHeight);
     mathSubmitBtn.show();
   }
 }
@@ -926,50 +961,49 @@ function removeMathElements() {
 }
 
 function drawMathCaptchaUI() {
-  const w = constrain(round(min(width * 0.85, 520)), 320, 520);
-  const h = constrain(round(min(height * 0.36, 280)), 200, 320);
+  background(UI95.bg);
+  ui95SetFont();
+  noSmooth();
+
+  const w = constrain(round(min(width * 0.92, 560)), 320, 560);
+  const h = constrain(round(min(height * 0.52, 320)), 240, 340);
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
-  push();
-  fill(WHITE);
-  stroke(200);
-  rect(x, y, w, h, 8);
-  pop();
+  ui95Panel(x, y, w, h, "Math Verification");
 
   push();
-  noStroke();
   fill(0);
-  textAlign(CENTER, CENTER);
-  textSize(18);
-  textStyle(BOLD);
-  text("Math Verification", x + w / 2, y + 28);
-  textStyle(NORMAL);
-  pop();
-
-  push();
-  noStroke();
-  fill(245);
-  rect(x + 20, y + 60, w - 40, 80, 6);
-
-  fill(0);
-  textAlign(CENTER, CENTER);
-  textSize(32);
-  textStyle(BOLD);
-  let problemText = mathProblem.num1 + ' ' + mathProblem.operator + ' ' + mathProblem.num2 + ' = ?';
-  text(problemText, x + w / 2, y + 100);
-  textStyle(NORMAL);
-  pop();
-
-  push();
-  noStroke();
-  fill(60);
   textAlign(LEFT, TOP);
   textSize(13);
-  text("Solve the math problem above and enter your answer below.", x + 20, y + 160);
+  textStyle(BOLD);
+  text("Please solve:", x + 18, y + 40);
+  pop();
+
+  const boxX = x + 18;
+  const boxY = y + 66;
+  const boxW = w - 36;
+  const boxH = 64;
+
+  push();
+  ui95BevelRect(boxX, boxY, boxW, boxH, true);
+  fill(0);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(28);
+  const problemText = `${mathProblem.num1} ${mathProblem.operator} ${mathProblem.num2} = ?`;
+  text(problemText, boxX + boxW / 2, boxY + boxH / 2 + 2);
+  pop();
+
+  push();
+  fill(40);
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(12);
+  text("Enter your answer below.", x + 18, y + 142);
   if (mathMsg) {
-    fill(180, 30, 30);
-    text(mathMsg, x + 20, y + 180);
+    fill(160, 0, 0);
+    text(mathMsg, x + 18, y + 162);
   }
   pop();
 
@@ -1011,7 +1045,6 @@ function handleMathSubmit() {
     errorInfoStartTime = 0;
     restartBtnBox = null;
 
-    // reset verify button vibe
     verifyButtonClicks = 0;
     verifyButtonMessage = 'verifying';
     verifyButtonMessageTime = 0;
@@ -1027,8 +1060,7 @@ function handleMathSubmit() {
   return false;
 }
 
-/* ------------------ TOP BAR, POPUPS, and CAMERA HELPERS ------------------ */
-
+// top bar of camera captcha
 function drawTopBar(topBarH) {
   fill(BLUE);
   rect(0, 0, width, topBarH);
@@ -1080,6 +1112,7 @@ function manageFeedback(topBarH, stageIndex) {
   }
 }
 
+// popups for camera captcha
 function createAndAddPopup(message, topBarH, randomPosition) {
   const maxW = min(width * 0.9, 520);
   const w = constrain(round(maxW), 280, maxW);
@@ -1169,7 +1202,7 @@ function drawPopup(popup) {
   pop();
 }
 
-/* ------------------ BOTTOM BUTTON ------------------ */
+// verification button
 function drawBottomButton() {
   let btnW = constrain(round(width * 0.28), 120, 260);
   let btnH = 46;
@@ -1221,6 +1254,7 @@ function drawBottomButton() {
   }
 }
 
+// verification button acts parallel to the popups
 function handleVerifyButtonClick() {
   verifyButtonClicks++;
   verifyButtonMessageTime = millis();
@@ -1243,35 +1277,32 @@ function handleVerifyButtonClick() {
   }
 }
 
-/* ------------------ INPUT & POINTER HANDLING ------------------ */
+// input & pointer handling
 function touchStarted() { return handlePointer(mouseX, mouseY); }
 function mousePressed() { return handlePointer(mouseX, mouseY); }
 
 function handlePointer(px, py) {
-
-  // WHEEL stage
+  // wheel stage
   if (stage === 'wheel') {
     if (!wheelSpinning && spinBtnBox &&
         px >= spinBtnBox.x && px <= spinBtnBox.x + spinBtnBox.w &&
         py >= spinBtnBox.y && py <= spinBtnBox.y + spinBtnBox.h) {
-        startPrizeWheelSpin();   // start the controlled spin
-        wheelResultIndex = null;
-        return false;
-      }
+      startPrizeWheelSpin();
+      wheelResultIndex = null;
+      return false;
+    }
     return false;
   }
 
-  // CLAIM stage
+  // claim stage
   if (stage === 'claim') {
     if (claimBtnBox &&
         px >= claimBtnBox.x && px <= claimBtnBox.x + claimBtnBox.w &&
         py >= claimBtnBox.y && py <= claimBtnBox.y + claimBtnBox.h) {
 
-      // Route into verification flow
       stage = 'consent';
       consentChecked = false;
 
-      // Reset verification-related state
       popups = [];
       userInteracted = false;
       feedbackStartMillis = 0;
@@ -1282,11 +1313,8 @@ function handlePointer(px, py) {
       errorInfoStartTime = 0;
       restartBtnBox = null;
 
-      // If math inputs exist for some reason, remove them
-      // (Usually they won't exist yet, but safe)
       if (mathInput || mathSubmitBtn) removeMathElements();
 
-      // Reset verify button state
       verifyButtonClicks = 0;
       verifyButtonMessage = 'verifying';
       verifyButtonMessageTime = 0;
@@ -1296,7 +1324,7 @@ function handlePointer(px, py) {
     return false;
   }
 
-  // CONSENT stage
+  // bot-check stage
   if (stage === 'consent') {
     if (consentBox && px >= consentBox.x && px <= consentBox.x + consentBox.size &&
         py >= consentBox.y && py <= consentBox.y + consentBox.size) {
@@ -1320,12 +1348,11 @@ function handlePointer(px, py) {
     return false;
   }
 
-  // MATH stage
+  // math stage
   if (stage === 'math') return false;
 
-  // CAMERA stage
+  // camera stage
   if (stage === 'camera') {
-    // Ending screen: block all interactions except restart once complete
     if (showBlueErrorScreen) {
       if (errorInfoProgress >= 100 && restartBtnBox) {
         let rb = restartBtnBox;
@@ -1337,7 +1364,6 @@ function handlePointer(px, py) {
       return false;
     }
 
-    // Verify button
     if (window.verifyBtnBox) {
       let vb = window.verifyBtnBox;
       if (px >= vb.x && px <= vb.x + vb.w && py >= vb.y && py <= vb.y + vb.h) {
@@ -1346,7 +1372,6 @@ function handlePointer(px, py) {
       }
     }
 
-    // Popup close buttons
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
       let dx = px - popup.closeBtn.x;
@@ -1358,7 +1383,6 @@ function handlePointer(px, py) {
       }
     }
 
-    // Popup body
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
       if (px >= popup.box.x && px <= popup.box.x + popup.box.w &&
@@ -1367,7 +1391,6 @@ function handlePointer(px, py) {
       }
     }
 
-    // Grid tap
     if (lastGridBox) {
       if (px >= lastGridBox.x && px <= lastGridBox.x + lastGridBox.size &&
           py >= lastGridBox.y && py <= lastGridBox.y + lastGridBox.size) {
@@ -1396,8 +1419,7 @@ function handlePointer(px, py) {
   return false;
 }
 
-
-/* ------------------ MAPPING / SCRAMBLING ------------------ */
+// mapping + scrambling grid
 function initMapping() {
   mapping = [];
   const total = gridCols * gridRows;
@@ -1423,7 +1445,7 @@ function arraysEqual(a, b) {
   return true;
 }
 
-/* ------------------ BLACKOUT SQUARES ------------------ */
+// blackout squares
 function updateBlackoutSquares() {
   let count = floor(random(1, 4));
   blackoutSquares = [];
@@ -1438,7 +1460,7 @@ function updateBlackoutSquares() {
   }
 }
 
-/* ------------------ EFFECTS ASSIGNMENT & APPLICATION ------------------ */
+// effects/filters
 function assignTileEffects() {
   tileEffects = [];
   tileSeeds = [];
@@ -1527,7 +1549,6 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
   image(tileImg, dx, dy, w, h);
 }
 
-/* ------------------ MISC ------------------ */
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if (mathInput || mathSubmitBtn) positionMathElements();
