@@ -51,7 +51,7 @@ let buffer = null;
 
 // feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 18000; // stage escalation
+const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
 let userInteracted = false; 
@@ -1554,4 +1554,5 @@ function windowResized() {
   if (mathInput || mathSubmitBtn) positionMathElements();
 
 }
+
 
