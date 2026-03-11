@@ -51,8 +51,8 @@ let buffer = null;
 
 // feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 1600;
-const FEEDBACK_CHANGE_MS = 6000;
+const FEEDBACK_STAGE_DURATION_MS = 1800; // stage escalation
+const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
 let userInteracted = false; 
 
@@ -91,11 +91,11 @@ let blackoutSquares = []; // array of indices that are blacked out
 let lastBlackoutChange = 0;
 const BLACKOUT_CHANGE_INTERVAL = 2000; // change blackout pattern every 2s in stage 5+
 
-// Auto-scramble for stage 5+
+// auto-scramble for stage 5+
 let lastAutoScramble = 0;
 const AUTO_SCRAMBLE_INTERVAL = 3000;
 
-// Multiple popups for stage 6
+// multiple popups for stage 6
 const MAX_POPUPS_STAGE_6 = 5;
 let lastPopupSpawn = 0;
 const POPUP_SPAWN_INTERVAL = 1200;
