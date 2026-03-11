@@ -51,7 +51,7 @@ let buffer = null;
 
 // feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 1800; // stage escalation
+const FEEDBACK_STAGE_DURATION_MS = 2000; // stage escalation
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
 let userInteracted = false; 
@@ -1552,4 +1552,5 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if (mathInput || mathSubmitBtn) positionMathElements();
+
 }
