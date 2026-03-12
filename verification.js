@@ -817,18 +817,22 @@ function drawBlueErrorScreenCentered(progressPct) {
   fill(0, 0, 0, 18);
   rect(panelX, panelY, panelW, panelH, 2);
 
-  // responsive padding + responsive typography (prevents overlap on mobile)
-  const isSmall = (width < 420) || (height < 740);
-
-  const pad = isSmall ? 16 : 26;
+  // ✅ Key fix: make padding + font sizes respond to the panel size,
+  // so the content expands to "use" the box on large screens but still fits on mobile.
+  const pad = constrain(round(panelW * 0.04), 14, 34);
   const x = panelX + pad;
   let y = panelY + pad;
   const maxW = panelW - pad * 2;
 
-  const faceSize = isSmall ? 30 : 38;
-  const bodySize = isSmall ? 14 : 18;
-  const bodyGap = round(bodySize * 1.6);
-  const sectionGap = round(bodySize * 0.9);
+  // Scale typography off the panel height (not device category)
+  const faceSize = constrain(round(panelH * 0.09), 26, 44);
+  const bodySize = constrain(round(panelH * 0.042), 13, 22);
+  const progressSize = constrain(round(panelH * 0.048), 14, 24);
+
+  // Spacing derived from sizes so it stretches with the box
+  const afterFaceGap = round(faceSize * 0.55);
+  const paraGap = round(bodySize * 0.95);     // gap after each paragraph block
+  const sectionGap = round(bodySize * 0.55);  // extra padding between sections
 
   fill(255);
   textAlign(LEFT, TOP);
@@ -838,10 +842,9 @@ function drawBlueErrorScreenCentered(progressPct) {
   textSize(faceSize);
   text(":( ", x, y);
 
-  // space after face
-  y += round(faceSize * 1.45);
+  y += faceSize + afterFaceGap;
 
-  // body paragraphs
+  // body paragraphs (wrap within maxW)
   textStyle(NORMAL);
   textSize(bodySize);
 
@@ -849,13 +852,13 @@ function drawBlueErrorScreenCentered(progressPct) {
     "Your system ran into a problem and couldn't complete verification.",
     x, y, maxW
   );
-  y += bodyGap + sectionGap;
+  y += paraGap + sectionGap;
 
   text(
     "The system was unable to verify that the user is human.",
     x, y, maxW
   );
-  y += bodyGap + sectionGap;
+  y += paraGap + sectionGap;
 
   text(
     "We're just collecting some error info, and then we'll restart for you.",
@@ -863,15 +866,15 @@ function drawBlueErrorScreenCentered(progressPct) {
   );
 
   // progress
-  y += bodyGap + round(bodySize * 1.0);
+  y += paraGap + sectionGap;
   textStyle(BOLD);
-  textSize(isSmall ? 16 : 20);
+  textSize(progressSize);
   text(`${progressPct}% complete`, x, y);
 
   // bar
-  y += round((isSmall ? 16 : 20) * 1.6);
-  const barW = min(maxW, 520);
-  const barH = isSmall ? 8 : 10;
+  y += round(progressSize * 1.35);
+  const barW = min(maxW, round(panelW * 0.72));
+  const barH = constrain(round(panelH * 0.02), 8, 14);
 
   noStroke();
   fill(255, 255, 255, 55);
@@ -883,10 +886,10 @@ function drawBlueErrorScreenCentered(progressPct) {
   // restart button (when complete)
   restartBtnBox = null;
   if (progressPct >= 100) {
-    y += bodyGap + round(bodySize * 0.6);
+    y += round(panelH * 0.10); // bigger "bottom section" so it doesn't look cramped
 
-    const btnW = isSmall ? 180 : 220;
-    const btnH = isSmall ? 40 : 44;
+    const btnW = constrain(round(panelW * 0.34), 170, 260);
+    const btnH = constrain(round(panelH * 0.085), 38, 52);
     const btnX = x;
     const btnY = y;
 
@@ -901,7 +904,7 @@ function drawBlueErrorScreenCentered(progressPct) {
     fill(255);
     textAlign(CENTER, CENTER);
     textStyle(BOLD);
-    textSize(isSmall ? 16 : 18);
+    textSize(constrain(round(panelH * 0.04), 14, 20));
     text("Restart", btnX + btnW / 2, btnY + btnH / 2);
   }
 
