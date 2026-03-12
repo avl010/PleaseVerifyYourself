@@ -31,6 +31,12 @@ let spinProgress = 0;
 let spinDuration = 150;
 let spinTurns = 6;
 
+//audio sfx
+let prizeWheelSfx = null;
+let prizeWheelSfxReady = false;
+let confettiSfx = null;
+let confettiSfxReady = false;
+
 // confetti effect
 let confetti = [];
 let confettiPlaying = false;
@@ -60,6 +66,7 @@ let userInteracted = false;
 let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
 
 // verify button state
+let verifyBtnBox = null;
 let verifyButtonClicks = 0;
 let verifyButtonMessage = 'verifying';
 let verifyButtonMessageTime = 0;
@@ -248,6 +255,8 @@ function setup() {
   textAlign(CENTER, CENTER);
   initMapping();
   noStroke();
+  initPrizeWheelSfx();
+  initConfettiSfx();
 }
 
 function draw() {
@@ -278,14 +287,61 @@ function draw() {
   }
 
   // camera stage
-  let topBarH = constrain(round(height * 0.16), 80, 160);
-  drawTopBar(topBarH);
+  ui95SetFont();
 
+  // Window frame sizing
+  const winW = min(width * 0.94, 920);
+  const winH = min(height * 0.90, 760);
+  const winX = (width - winW) / 2;
+  const winY = (height - winH) / 2;
+
+  ui95Panel(winX, winY, winW, winH, "Please Verify Yourself");
+
+  // client area box
+  const titleH = 24;
+  const pad = 14;
+  const contentX = winX + 4 + pad;
+  const contentY = winY + 2 + titleH + 2 + pad;
+  const contentW = winW - 8 - pad * 2;
+  const contentH = winH - (titleH + 8) - pad * 2;
+
+  let topBarH = constrain(round(contentH * 0.18), 80, 160);
+
+  push();
+  noStroke();
+  fill(BLUE);
+  rect(contentX, contentY, contentW, topBarH);
+
+  let leftPad = constrain(round(contentW * 0.04), 12, 28);
+  fill(TEXT_COLOR);
+  textAlign(LEFT, CENTER);
+
+  let topPadding = topBarH * 0.12;
+  let lineHeight = (topBarH - topPadding * 2) / 3;
+  let xText = contentX + leftPad;
+
+  textStyle(NORMAL);
+  let size1 = constrain(round(lineHeight * 0.45), 12, 20);
+  textSize(size1);
+  text('Select all squares with', xText, contentY + topPadding + lineHeight * 0.5);
+
+  let size2 = constrain(round(lineHeight * 0.9), 20, 36);
+  textSize(size2);
+  textStyle(BOLD);
+  text('human', xText, contentY + topPadding + lineHeight * 1.5);
+  textStyle(NORMAL);
+
+  textSize(size1);
+  text('If there are any, continue', xText, contentY + topPadding + lineHeight * 2.5);
+  pop();
+
+  // feedback timing
   if (!feedbackStartMillis) feedbackStartMillis = millis();
   let elapsed = millis() - feedbackStartMillis;
   let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
   stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
+  // ending blue screen
   if (stageIndex >= 6 || showBlueErrorScreen) {
     startAndDrawBlueErrorScreen();
     lastGridBox = null;
@@ -297,141 +353,171 @@ function draw() {
     noStroke();
     textAlign(CENTER, CENTER);
     textSize(20);
-    text("Starting camera...", width / 2, height / 2);
+    text("Starting camera...", winX + winW / 2, winY + winH / 2);
 
     if (userInteracted) manageFeedback(topBarH, stageIndex);
-    drawBottomButton();
+
+    drawBottomButton({ x: contentX, y: contentY, w: contentW, h: contentH });
+
     lastGridBox = null;
     return;
+}
+
+// grid layout
+let availableH = contentH - topBarH - 16;
+let maxSquare = min(contentW * 0.98, availableH * 0.98);
+let squareSize = maxSquare;
+let xOffset = contentX + (contentW - squareSize) / 2;
+let yOffset = contentY + topBarH + ((availableH - squareSize) / 2) + 8;
+let destCellSize = squareSize / gridCols;
+
+lastGridBox = { x: xOffset, y: yOffset, size: squareSize };
+
+// camera grid sizing
+let vW = capture.elt.videoWidth;
+let vH = capture.elt.videoHeight;
+let videoSize = min(vW, vH);
+let sx0 = Math.floor((vW - videoSize) / 2);
+let sy0 = Math.floor((vH - videoSize) / 2);
+let srcCellSize = Math.floor(videoSize / gridCols);
+
+if (!buffer || buffer.width !== videoSize || buffer.height !== videoSize) {
+  buffer = createGraphics(videoSize, videoSize);
+}
+
+buffer.push();
+buffer.clear();
+buffer.imageMode(CORNER);
+buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
+buffer.pop();
+
+// effects
+if (stageIndex >= 3 && !effectsAssigned) {
+  assignTileEffects();
+  effectsAssigned = true;
+}
+if (stageIndex < 3 && effectsAssigned) {
+  effectsAssigned = false;
+  tileEffects = [];
+  tileSeeds = [];
+  blackoutSquares = [];
+}
+
+let intensity = 0.0;
+if (stageIndex === 3) intensity = 0.3;
+if (stageIndex === 4) intensity = 0.6;
+if (stageIndex >= 5) intensity = 1.0;
+
+if (stageIndex >= 4) {
+  if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
+    scrambleMapping();
+    lastAutoScramble = millis();
   }
-
-  let availableH = height - topBarH - 32;
-  let maxSquare = min(width * 0.95, availableH * 0.95);
-  let squareSize = maxSquare;
-  let xOffset = (width - squareSize) / 2;
-  let yOffset = topBarH + ((availableH - squareSize) / 2) + 8;
-  let destCellSize = squareSize / gridCols;
-
-  lastGridBox = { x: xOffset, y: yOffset, size: squareSize };
-
-  let vW = capture.elt.videoWidth;
-  let vH = capture.elt.videoHeight;
-  let videoSize = min(vW, vH);
-  let sx0 = Math.floor((vW - videoSize) / 2);
-  let sy0 = Math.floor((vH - videoSize) / 2);
-  let srcCellSize = Math.floor(videoSize / gridCols);
-
-  if (!buffer || buffer.width !== videoSize || buffer.height !== videoSize) {
-    buffer = createGraphics(videoSize, videoSize);
+  if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
+    updateBlackoutSquares();
+    lastBlackoutChange = millis();
   }
+}
 
-  buffer.push();
-  buffer.clear();
-  buffer.imageMode(CORNER);
-  buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
-  buffer.pop();
+push();
+ui95BevelRect(xOffset - 6, yOffset - 6, squareSize + 12, squareSize + 12, true);
+pop();
 
-  if (stageIndex >= 3 && !effectsAssigned) {
-    assignTileEffects();
-    effectsAssigned = true;
-  }
-  if (stageIndex < 3 && effectsAssigned) {
-    effectsAssigned = false;
-    tileEffects = [];
-    tileSeeds = [];
-    blackoutSquares = [];
-  }
+push();
+translate(xOffset + squareSize, yOffset);
+scale(-1, 1);
+imageMode(CORNER);
 
-  let intensity = 0.0;
-  if (stageIndex === 3) intensity = 0.3;
-  if (stageIndex === 4) intensity = 0.6;
-  if (stageIndex >= 5) intensity = 1.0;
+for (let r = 0; r < gridRows; r++) {
+  for (let c = 0; c < gridCols; c++) {
+    let destIndex = r * gridCols + c;
+    let srcIndex = mapping[destIndex];
 
-  if (stageIndex >= 4) {
-    if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
-      scrambleMapping();
-      lastAutoScramble = millis();
-    }
-    if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
-      updateBlackoutSquares();
-      lastBlackoutChange = millis();
-    }
-  }
-
-  push();
-  noStroke();
-  fill(240);
-  let pad = 6;
-  rect(xOffset - pad, yOffset - pad, squareSize + pad * 2, squareSize + pad * 2, 8);
-  pop();
-
-  push();
-  translate(xOffset + squareSize, yOffset);
-  scale(-1, 1);
-  imageMode(CORNER);
-
-  for (let r = 0; r < gridRows; r++) {
-    for (let c = 0; c < gridCols; c++) {
-      let destIndex = r * gridCols + c;
-      let srcIndex = mapping[destIndex];
-
-      if (blackoutSquares.includes(destIndex)) {
-        let dx = c * destCellSize;
-        let dy = r * destCellSize;
-        fill(0);
-        noStroke();
-        rect(dx, dy, destCellSize, destCellSize);
-        continue;
-      }
-
-      let srcX = (srcIndex % gridCols) * srcCellSize;
-      let srcY = Math.floor(srcIndex / gridCols) * srcCellSize;
-
-      let tile = buffer.get(srcX, srcY, srcCellSize, srcCellSize);
-
+    if (blackoutSquares.includes(destIndex)) {
       let dx = c * destCellSize;
       let dy = r * destCellSize;
-
-      if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
-        applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
-      } else {
-        image(tile, dx, dy, destCellSize, destCellSize);
-      }
-    }
-  }
-  pop();
-
-  if (highlightedCell > -1) {
-    let t = millis() - highlightStart;
-    if (t <= HIGHLIGHT_DURATION) {
-      let r = floor(highlightedCell / gridCols);
-      let c = highlightedCell % gridCols;
-      push();
+      fill(0);
       noStroke();
-      fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
-      rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
-      stroke(212, 246, 255);
-      strokeWeight(3);
-      noFill();
-      rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
-      pop();
+      rect(dx, dy, destCellSize, destCellSize);
+      continue;
+    }
+
+    let srcX = (srcIndex % gridCols) * srcCellSize;
+    let srcY = Math.floor(srcIndex / gridCols) * srcCellSize;
+
+    let tile = buffer.get(srcX, srcY, srcCellSize, srcCellSize);
+
+    let dx = c * destCellSize;
+    let dy = r * destCellSize;
+
+    if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
+      applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
     } else {
-      highlightedCell = -1;
+      image(tile, dx, dy, destCellSize, destCellSize);
     }
   }
+}
+pop();
 
-  stroke(200);
-  strokeWeight(2);
-  noFill();
-  for (let i = 0; i < gridCols; i++) {
-    for (let j = 0; j < gridRows; j++) {
-      rect(xOffset + i * destCellSize, yOffset + j * destCellSize, destCellSize, destCellSize);
-    }
+// highlighted square
+if (highlightedCell > -1) {
+  let t = millis() - highlightStart;
+  if (t <= HIGHLIGHT_DURATION) {
+    let r = floor(highlightedCell / gridCols);
+    let c = highlightedCell % gridCols;
+    push();
+    noStroke();
+    fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
+    rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
+    stroke(212, 246, 255);
+    strokeWeight(3);
+    noFill();
+    rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
+    pop();
+  } else {
+    highlightedCell = -1;
   }
+}
 
-  drawBottomButton();
+stroke(200);
+strokeWeight(2);
+noFill();
+for (let i = 0; i < gridCols; i++) {
+  for (let j = 0; j < gridRows; j++) {
+    rect(xOffset + i * destCellSize, yOffset + j * destCellSize, destCellSize, destCellSize);
+  }
+}
 
-  if (userInteracted) manageFeedback(topBarH, stageIndex);
+drawBottomButton({ x: contentX, y: contentY, w: contentW, h: contentH });
+
+if (userInteracted) manageFeedback(topBarH, stageIndex);
+}
+
+// prize wheel sfx
+function initPrizeWheelSfx() {
+  if (prizeWheelSfxReady) return;
+
+  prizeWheelSfx = createAudio('sounds/prizewheel.mp3');
+  prizeWheelSfxReady = true;
+
+  // Optional: keep it subtle + consistent
+  prizeWheelSfx.volume(0.6);
+
+  // Prevent iOS from auto-fullscreening audio UI
+  if (prizeWheelSfx.elt) {
+    prizeWheelSfx.elt.playsInline = true;
+    prizeWheelSfx.elt.preload = 'auto';
+  }
+}
+
+function playPrizeWheelSfx() {
+  initPrizeWheelSfx();
+  if (!prizeWheelSfx) return;
+
+  // restart sound cleanly on repeated spins
+  try { prizeWheelSfx.stop(); } catch (e) {}
+  prizeWheelSfx.time(0);
+  prizeWheelSfx.play();
 }
 
 // prize wheel + claim
@@ -444,10 +530,11 @@ function startPrizeWheelSpin() {
   spinStartAngle = wheelAngle;
   spinProgress = 0;
 
-  spinDuration = floor(random(80, 115));
+  spinDuration = 215;
   spinTurns = floor(random(4, 7));
 
   wheelSpinning = true;
+  playPrizeWheelSfx();
 }
 
 function drawPrizeWheelUI() {
@@ -575,7 +662,32 @@ function drawPrizeWheelUI() {
   ui95Button(spinBtnBox, wheelSpinning ? "SPINNING..." : "SPIN", false);
 }
 
+function initConfettiSfx() {
+  if (confettiSfxReady) return;
+
+  confettiSfx = createAudio('sounds/confetti.mp3');
+  confettiSfxReady = true;
+
+  confettiSfx.volume(0.7);
+
+  if (confettiSfx.elt) {
+    confettiSfx.elt.playsInline = true;
+    confettiSfx.elt.preload = 'auto';
+  }
+}
+
+function playConfettiSfx() {
+  initConfettiSfx();
+  if (!confettiSfx) return;
+
+  try { confettiSfx.stop(); } catch (e) {}
+  confettiSfx.time(0);
+  confettiSfx.play();
+}
+
 function spawnConfetti() {
+  playConfettiSfx();
+
   confetti = [];
   confettiPlaying = true;
   confettiStartTime = millis();
@@ -701,54 +813,65 @@ function drawBlueErrorScreenCentered(progressPct) {
   const panelX = (width - panelW) / 2;
   const panelY = (height - panelH) / 2;
 
-  // subtle darker overlay to give it a centered look (like your test page)
+  // subtle darker overlay
   fill(0, 0, 0, 18);
   rect(panelX, panelY, panelW, panelH, 2);
 
-  const pad = 26;
+  // responsive padding + responsive typography (prevents overlap on mobile)
+  const isSmall = (width < 420) || (height < 740);
+
+  const pad = isSmall ? 16 : 26;
   const x = panelX + pad;
   let y = panelY + pad;
   const maxW = panelW - pad * 2;
+
+  const faceSize = isSmall ? 30 : 38;
+  const bodySize = isSmall ? 14 : 18;
+  const bodyGap = round(bodySize * 1.6);
+  const sectionGap = round(bodySize * 0.9);
 
   fill(255);
   textAlign(LEFT, TOP);
 
   // header face
   textStyle(BOLD);
-  textSize(38);
+  textSize(faceSize);
   text(":( ", x, y);
 
-  y += 58;
+  // space after face
+  y += round(faceSize * 1.45);
+
+  // body paragraphs
   textStyle(NORMAL);
-  textSize(18);
+  textSize(bodySize);
 
   text(
     "Your system ran into a problem and couldn't complete verification.",
     x, y, maxW
   );
+  y += bodyGap + sectionGap;
 
-  y += 54;
   text(
     "The system was unable to verify that the user is human.",
     x, y, maxW
   );
+  y += bodyGap + sectionGap;
 
-  y += 54;
   text(
     "We're just collecting some error info, and then we'll restart for you.",
     x, y, maxW
   );
 
   // progress
-  y += 66;
+  y += bodyGap + round(bodySize * 1.0);
   textStyle(BOLD);
-  textSize(20);
+  textSize(isSmall ? 16 : 20);
   text(`${progressPct}% complete`, x, y);
 
   // bar
-  y += 34;
+  y += round((isSmall ? 16 : 20) * 1.6);
   const barW = min(maxW, 520);
-  const barH = 10;
+  const barH = isSmall ? 8 : 10;
 
   noStroke();
   fill(255, 255, 255, 55);
@@ -760,10 +883,10 @@ function drawBlueErrorScreenCentered(progressPct) {
   // restart button (when complete)
   restartBtnBox = null;
   if (progressPct >= 100) {
-    y += 54;
+    y += bodyGap + round(bodySize * 0.6);
 
-    const btnW = 220;
-    const btnH = 44;
+    const btnW = isSmall ? 180 : 220;
+    const btnH = isSmall ? 40 : 44;
     const btnX = x;
     const btnY = y;
 
@@ -778,7 +901,7 @@ function drawBlueErrorScreenCentered(progressPct) {
     fill(255);
     textAlign(CENTER, CENTER);
     textStyle(BOLD);
-    textSize(18);
+    textSize(isSmall ? 16 : 18);
     text("Restart", btnX + btnW / 2, btnY + btnH / 2);
   }
 
@@ -972,16 +1095,27 @@ function drawMathCaptchaUI() {
 
   ui95Panel(x, y, w, h, "Math Verification");
 
+  // ✅ Increase/decrease this to move the whole content block down/up
+  const yOffset = 24; // try 16, 24, 32, 40
+
+  push();
+  fill(40);
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(12);
+  text("This question is to prevent automated spam submissions", x + 18, y + 20 + yOffset);
+  pop();
+
   push();
   fill(0);
   textAlign(LEFT, TOP);
   textSize(13);
   textStyle(BOLD);
-  text("Please solve:", x + 18, y + 40);
+  text("Please solve:", x + 18, y + 40 + yOffset);
   pop();
 
   const boxX = x + 18;
-  const boxY = y + 66;
+  const boxY = y + 66 + yOffset;
   const boxW = w - 36;
   const boxH = 64;
 
@@ -1000,10 +1134,10 @@ function drawMathCaptchaUI() {
   textAlign(LEFT, TOP);
   textStyle(NORMAL);
   textSize(12);
-  text("Enter your answer below.", x + 18, y + 142);
+  text("Enter your answer below.", x + 18, y + 142 + yOffset);
   if (mathMsg) {
     fill(160, 0, 0);
-    text(mathMsg, x + 18, y + 162);
+    text(mathMsg, x + 18, y + 162 + yOffset);
   }
   pop();
 
@@ -1202,13 +1336,19 @@ function drawPopup(popup) {
   pop();
 }
 
-// verification button
-function drawBottomButton() {
-  let btnW = constrain(round(width * 0.28), 120, 260);
+function drawBottomButton(container = null) {
+  let btnW = constrain(round((container ? container.w : width) * 0.28), 120, 260);
   let btnH = 46;
   let margin = 18;
-  let x = width - btnW - margin;
-  let y = height - btnH - margin;
+
+  let x, y;
+  if (container) {
+    x = container.x + container.w - btnW - margin;
+    y = container.y + container.h - btnH - margin;
+  } else {
+    x = width - btnW - margin;
+    y = height - btnH - margin;
+  }
 
   push();
   fill(0, 0, 0, 30);
@@ -1552,7 +1692,4 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if (mathInput || mathSubmitBtn) positionMathElements();
-
 }
-
-
