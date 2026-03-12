@@ -290,8 +290,26 @@ function draw() {
   ui95SetFont();
 
   // Window frame sizing
+  const VERIFY_BTN_H = 46;
+  const VERIFY_BTN_MARGIN = 18;
+  const GRID_BTN_GAP = 12; // space between grid and button area
+
+  // Window frame sizing (allow taller on mobile)
   const winW = min(width * 0.94, 920);
-  const winH = min(height * 0.90, 760);
+  const maxWinH = height * 0.94;
+
+  // Start with your current size, but allow it to grow if needed
+  let winH = min(height * 0.90, 760);
+
+  // Guarantee enough room for: topbar + grid + button area (rough minimum)
+  const minWinHNeeded =
+    (24 /*title*/ + 8 /*chrome*/ + 14 * 2 /*pad*/) +
+    (80 /*min topBarH*/) +
+    (220 /*min grid*/) +
+    (GRID_BTN_GAP + VERIFY_BTN_H + VERIFY_BTN_MARGIN);
+
+  winH = constrain(winH, minWinHNeeded, maxWinH);
+
   const winX = (width - winW) / 2;
   const winY = (height - winH) / 2;
 
@@ -363,134 +381,136 @@ function draw() {
     return;
 }
 
-// grid layout
-let availableH = contentH - topBarH - 16;
-let maxSquare = min(contentW * 0.98, availableH * 0.98);
-let squareSize = maxSquare;
-let xOffset = contentX + (contentW - squareSize) / 2;
-let yOffset = contentY + topBarH + ((availableH - squareSize) / 2) + 8;
-let destCellSize = squareSize / gridCols;
+  // grid layout
+  const reservedButtonAreaH = VERIFY_BTN_H + VERIFY_BTN_MARGIN + GRID_BTN_GAP;
+  let availableH = contentH - topBarH - reservedButtonAreaH;
+  let squareSize = min(contentW * 0.98, availableH * 0.98)
+  squareSize = max(squareSize, 200);
 
-lastGridBox = { x: xOffset, y: yOffset, size: squareSize };
+  let xOffset = contentX + (contentW - squareSize) / 2;
+  let yOffset = contentY + topBarH + ((availableH - squareSize) / 2) + 8;
+  let destCellSize = squareSize / gridCols;
 
-// camera grid sizing
-let vW = capture.elt.videoWidth;
-let vH = capture.elt.videoHeight;
-let videoSize = min(vW, vH);
-let sx0 = Math.floor((vW - videoSize) / 2);
-let sy0 = Math.floor((vH - videoSize) / 2);
-let srcCellSize = Math.floor(videoSize / gridCols);
+  lastGridBox = { x: xOffset, y: yOffset, size: squareSize };
 
-if (!buffer || buffer.width !== videoSize || buffer.height !== videoSize) {
-  buffer = createGraphics(videoSize, videoSize);
-}
+  // camera grid sizing
+  let vW = capture.elt.videoWidth;
+  let vH = capture.elt.videoHeight;
+  let videoSize = min(vW, vH);
+  let sx0 = Math.floor((vW - videoSize) / 2);
+  let sy0 = Math.floor((vH - videoSize) / 2);
+  let srcCellSize = Math.floor(videoSize / gridCols);
 
-buffer.push();
-buffer.clear();
-buffer.imageMode(CORNER);
-buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
-buffer.pop();
-
-// effects
-if (stageIndex >= 3 && !effectsAssigned) {
-  assignTileEffects();
-  effectsAssigned = true;
-}
-if (stageIndex < 3 && effectsAssigned) {
-  effectsAssigned = false;
-  tileEffects = [];
-  tileSeeds = [];
-  blackoutSquares = [];
-}
-
-let intensity = 0.0;
-if (stageIndex === 3) intensity = 0.3;
-if (stageIndex === 4) intensity = 0.6;
-if (stageIndex >= 5) intensity = 1.0;
-
-if (stageIndex >= 4) {
-  if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
-    scrambleMapping();
-    lastAutoScramble = millis();
+  if (!buffer || buffer.width !== videoSize || buffer.height !== videoSize) {
+    buffer = createGraphics(videoSize, videoSize);
   }
-  if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
-    updateBlackoutSquares();
-    lastBlackoutChange = millis();
+
+  buffer.push();
+  buffer.clear();
+  buffer.imageMode(CORNER);
+  buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
+  buffer.pop();
+
+  // effects
+  if (stageIndex >= 3 && !effectsAssigned) {
+    assignTileEffects();
+    effectsAssigned = true;
   }
-}
+  if (stageIndex < 3 && effectsAssigned) {
+    effectsAssigned = false;
+    tileEffects = [];
+    tileSeeds = [];
+    blackoutSquares = [];
+  }
 
-push();
-ui95BevelRect(xOffset - 6, yOffset - 6, squareSize + 12, squareSize + 12, true);
-pop();
+  let intensity = 0.0;
+  if (stageIndex === 3) intensity = 0.3;
+  if (stageIndex === 4) intensity = 0.6;
+  if (stageIndex >= 5) intensity = 1.0;
 
-push();
-translate(xOffset + squareSize, yOffset);
-scale(-1, 1);
-imageMode(CORNER);
+  if (stageIndex >= 4) {
+    if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
+      scrambleMapping();
+      lastAutoScramble = millis();
+    }
+    if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
+      updateBlackoutSquares();
+      lastBlackoutChange = millis();
+    }
+  }
 
-for (let r = 0; r < gridRows; r++) {
-  for (let c = 0; c < gridCols; c++) {
-    let destIndex = r * gridCols + c;
-    let srcIndex = mapping[destIndex];
+  push();
+  ui95BevelRect(xOffset - 6, yOffset - 6, squareSize + 12, squareSize + 12, true);
+  pop();
 
-    if (blackoutSquares.includes(destIndex)) {
+  push();
+  translate(xOffset + squareSize, yOffset);
+  scale(-1, 1);
+  imageMode(CORNER);
+
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols; c++) {
+      let destIndex = r * gridCols + c;
+      let srcIndex = mapping[destIndex];
+
+      if (blackoutSquares.includes(destIndex)) {
+        let dx = c * destCellSize;
+        let dy = r * destCellSize;
+        fill(0);
+        noStroke();
+        rect(dx, dy, destCellSize, destCellSize);
+        continue;
+      }
+
+      let srcX = (srcIndex % gridCols) * srcCellSize;
+      let srcY = Math.floor(srcIndex / gridCols) * srcCellSize;
+
+      let tile = buffer.get(srcX, srcY, srcCellSize, srcCellSize);
+
       let dx = c * destCellSize;
       let dy = r * destCellSize;
-      fill(0);
+
+      if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
+        applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
+      } else {
+        image(tile, dx, dy, destCellSize, destCellSize);
+      }
+    }
+  }
+  pop();
+
+  // highlighted square
+  if (highlightedCell > -1) {
+    let t = millis() - highlightStart;
+    if (t <= HIGHLIGHT_DURATION) {
+      let r = floor(highlightedCell / gridCols);
+      let c = highlightedCell % gridCols;
+      push();
       noStroke();
-      rect(dx, dy, destCellSize, destCellSize);
-      continue;
-    }
-
-    let srcX = (srcIndex % gridCols) * srcCellSize;
-    let srcY = Math.floor(srcIndex / gridCols) * srcCellSize;
-
-    let tile = buffer.get(srcX, srcY, srcCellSize, srcCellSize);
-
-    let dx = c * destCellSize;
-    let dy = r * destCellSize;
-
-    if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
-      applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
+      fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
+      rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
+      stroke(212, 246, 255);
+      strokeWeight(3);
+      noFill();
+      rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
+      pop();
     } else {
-      image(tile, dx, dy, destCellSize, destCellSize);
+      highlightedCell = -1;
     }
   }
-}
-pop();
 
-// highlighted square
-if (highlightedCell > -1) {
-  let t = millis() - highlightStart;
-  if (t <= HIGHLIGHT_DURATION) {
-    let r = floor(highlightedCell / gridCols);
-    let c = highlightedCell % gridCols;
-    push();
-    noStroke();
-    fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
-    rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
-    stroke(212, 246, 255);
-    strokeWeight(3);
-    noFill();
-    rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
-    pop();
-  } else {
-    highlightedCell = -1;
+  stroke(200);
+  strokeWeight(2);
+  noFill();
+  for (let i = 0; i < gridCols; i++) {
+    for (let j = 0; j < gridRows; j++) {
+      rect(xOffset + i * destCellSize, yOffset + j * destCellSize, destCellSize, destCellSize);
+    }
   }
-}
 
-stroke(200);
-strokeWeight(2);
-noFill();
-for (let i = 0; i < gridCols; i++) {
-  for (let j = 0; j < gridRows; j++) {
-    rect(xOffset + i * destCellSize, yOffset + j * destCellSize, destCellSize, destCellSize);
-  }
-}
+  drawBottomButton({ x: contentX, y: contentY, w: contentW, h: contentH });
 
-drawBottomButton({ x: contentX, y: contentY, w: contentW, h: contentH });
-
-if (userInteracted) manageFeedback(topBarH, stageIndex);
+  if (userInteracted) manageFeedback(topBarH, stageIndex);
 }
 
 // prize wheel sfx
