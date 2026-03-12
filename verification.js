@@ -60,7 +60,7 @@ let buffer = null;
 // feedback timing & content
 let feedbackStartMillis = 0;
 const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation
-const FEEDBACK_CHANGE_MS = 6000; // attempt to show a new popup
+const FEEDBACK_CHANGE_MS = 5500; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
 let userInteracted = false;
 
@@ -111,7 +111,7 @@ const AUTO_SCRAMBLE_INTERVAL = 3000;
 // multiple popups for stage 6
 const MAX_POPUPS_STAGE_6 = 5;
 let lastPopupSpawn = 0;
-const POPUP_SPAWN_INTERVAL = 1200;
+const POPUP_SPAWN_INTERVAL = 1000;
 
 const BLUE = "#1a73e8";
 const WHITE = "#ffffff";
@@ -2001,5 +2001,4 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if (mathInput || mathSubmitBtn) positionMathElements();
-
 }
