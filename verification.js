@@ -65,8 +65,8 @@ let lastFeedbackAttempt = 0;
 let userInteracted = false;
 
 // feedback de-duplication
-let feedbackBags = {}; 
-let lastFeedbackMessage = ""; 
+let feedbackBags = {};
+let lastFeedbackMessage = "";
 
 // popup state
 let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
@@ -226,10 +226,7 @@ const FEEDBACK_BY_STAGE = [
     "Center your face in the frame.",
     "Remove anything covering your face.",
   ],
-  [
-    "Stop moving.", 
-    "Try fixing your hair.", 
-    "Fix your posture."],
+  ["Stop moving.", "Try fixing your hair.", "Fix your posture."],
   [
     "Is something wrong with your face?",
     "I can't seem to verify you. You look strange from this angle.",
@@ -247,10 +244,7 @@ const FEEDBACK_BY_STAGE = [
     "SYSTEM MALFUNCTION DETECTED",
     "Cannot process image data",
   ],
-  [
-    "CRITICAL ERROR", 
-    "SYSTEM FAILURE IMMINENT", 
-    "SHUTTING DOWN"],
+  ["CRITICAL ERROR", "SYSTEM FAILURE IMMINENT", "SHUTTING DOWN"],
 ];
 
 function setup() {
@@ -367,7 +361,23 @@ function draw() {
   // feedback timing
   if (!feedbackStartMillis) feedbackStartMillis = millis();
   let elapsed = millis() - feedbackStartMillis;
-  let stageIndex = floor(elapsed / FEEDBACK_STAGE_DURATION_MS);
+  const T1 = 20000;
+  const T2 = 40000;
+  const T3 = 60000;
+  const T4 = 80000;
+  const T5 = 100000;
+  const CHAOS_MS = 6000;
+  const T6 = T5 + CHAOS_MS;
+
+  let stageIndex = 0;
+  if (elapsed >= T6) stageIndex = 6;
+  else if (elapsed >= T5) stageIndex = 5;
+  else if (elapsed >= T4) stageIndex = 4;
+  else if (elapsed >= T3) stageIndex = 3;
+  else if (elapsed >= T2) stageIndex = 2;
+  else if (elapsed >= T1) stageIndex = 1;
+  else stageIndex = 0;
+
   stageIndex = constrain(stageIndex, 0, FEEDBACK_BY_STAGE.length - 1);
 
   // ending blue screen
@@ -437,33 +447,80 @@ function draw() {
   );
   buffer.pop();
 
-  // effects
-  if (stageIndex >= 3 && !effectsAssigned) {
-    assignTileEffects();
-    effectsAssigned = true;
-  }
-  if (stageIndex < 3 && effectsAssigned) {
+  // ---------------------------------------------------------------------------
+  // EFFECTS (UPDATED progression + shorter chaos)
+  // ---------------------------------------------------------------------------
+
+  // timing knobs (ms)
+  const AUTO_SCRAMBLE_INTERVAL_NORMAL = 1200;
+  const AUTO_SCRAMBLE_INTERVAL_CHAOS = 180;
+  const BLACKOUT_CHANGE_INTERVAL_NORMAL = 900;
+  const BLACKOUT_CHANGE_INTERVAL_CHAOS = 180;
+
+  const stageFx = stageIndex;
+
+  // stage 0: normal (no effects)
+  if (stageFx <= 0) {
     effectsAssigned = false;
     tileEffects = [];
     tileSeeds = [];
     blackoutSquares = [];
+    window._lastFxStage = -1;
+  } else {
+    // reassign effects whenever stage changes
+    if (!effectsAssigned || window._lastFxStage !== stageFx) {
+      // effect ids: 1 scanlines, 2 noise, 3 pixelate, 4 blur
+      let allowed = [2]; // noise only default
+
+      if (stageFx === 1) allowed = [2]; // noise
+      else if (stageFx === 2) allowed = [2, 1]; // + scanlines
+      else if (stageFx === 3) allowed = [2, 1, 3]; // + pixelate
+      else allowed = [2, 1, 3, 4]; // stage 4+ go crazy (include blur)
+
+      assignTileEffectsFromAllowed(allowed);
+
+      effectsAssigned = true;
+      window._lastFxStage = stageFx;
+    }
   }
 
+  // intensity ramp (more obvious earlier)
   let intensity = 0.0;
-  if (stageIndex === 3) intensity = 0.3;
-  if (stageIndex === 4) intensity = 0.6;
-  if (stageIndex >= 5) intensity = 1.0;
+  if (stageFx === 1) intensity = 0.4;
+  if (stageFx === 2) intensity = 0.65;
+  if (stageFx === 3) intensity = 0.85;
+  if (stageFx >= 4) intensity = 1.0;
 
-  if (stageIndex >= 4) {
-    if (millis() - lastAutoScramble >= AUTO_SCRAMBLE_INTERVAL) {
+  // blackout progression
+  let blackoutTarget = 0;
+  if (stageFx === 3) blackoutTarget = 2;
+  if (stageFx === 4) blackoutTarget = 4;
+  if (stageFx >= 5) blackoutTarget = 7; // mostly black right before BSOD
+
+  if (blackoutTarget > 0) {
+    const blackoutInterval =
+      stageFx >= 5 ? BLACKOUT_CHANGE_INTERVAL_CHAOS : BLACKOUT_CHANGE_INTERVAL_NORMAL;
+
+    if (millis() - lastBlackoutChange >= blackoutInterval) {
+      setBlackoutCount(blackoutTarget);
+      lastBlackoutChange = millis();
+    }
+  } else {
+    blackoutSquares = [];
+  }
+
+  // scramble progression
+  if (stageFx >= 4) {
+    const scrambleInterval =
+      stageFx >= 5 ? AUTO_SCRAMBLE_INTERVAL_CHAOS : AUTO_SCRAMBLE_INTERVAL_NORMAL;
+
+    if (millis() - lastAutoScramble >= scrambleInterval) {
       scrambleMapping();
       lastAutoScramble = millis();
     }
-    if (millis() - lastBlackoutChange >= BLACKOUT_CHANGE_INTERVAL) {
-      updateBlackoutSquares();
-      lastBlackoutChange = millis();
-    }
   }
+
+  // ---------------------------------------------------------------------------
 
   push();
   ui95BevelRect(
@@ -502,11 +559,7 @@ function draw() {
       let dx = c * destCellSize;
       let dy = r * destCellSize;
 
-      if (
-        effectsAssigned &&
-        tileEffects[destIndex] &&
-        tileEffects[destIndex] !== 0
-      ) {
+      if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
         applyAndDrawEffect(
           tile,
           tileEffects[destIndex],
@@ -583,7 +636,7 @@ function draw() {
 function initClickSfx() {
   if (clickSfxReady) return;
 
-  clickSfx = createAudio('sounds/click.mp3');
+  clickSfx = createAudio("sounds/click.mp3");
   clickSfxReady = true;
 
   // keep it subtle
@@ -592,7 +645,7 @@ function initClickSfx() {
   // iOS: prevent fullscreen audio UI
   if (clickSfx.elt) {
     clickSfx.elt.playsInline = true;
-    clickSfx.elt.preload = 'auto';
+    clickSfx.elt.preload = "auto";
   }
 }
 
@@ -601,7 +654,9 @@ function playClickSfx() {
   if (!clickSfx) return;
 
   // restart cleanly for rapid taps
-  try { clickSfx.stop(); } catch (e) {}
+  try {
+    clickSfx.stop();
+  } catch (e) {}
   clickSfx.time(0);
   clickSfx.play();
 }
@@ -913,11 +968,7 @@ function startAndDrawBlueErrorScreen() {
   }
 
   let elapsedErr = millis() - errorInfoStartTime;
-  errorInfoProgress = constrain(
-    (elapsedErr / ERROR_INFO_DURATION) * 100,
-    0,
-    100,
-  );
+  errorInfoProgress = constrain((elapsedErr / ERROR_INFO_DURATION) * 100, 0, 100);
 
   drawBlueErrorScreenCentered(round(errorInfoProgress));
 }
@@ -1365,7 +1416,7 @@ function refillFeedbackBag(stageIndex) {
 
   // Avoid immediate repeat across refills
   if (bag.length > 1 && lastFeedbackMessage) {
-    bag = bag.filter(m => m !== lastFeedbackMessage);
+    bag = bag.filter((m) => m !== lastFeedbackMessage);
     // if filtering removed everything (pool was all same), fall back to full pool
     if (bag.length === 0) bag = pool.slice();
   }
@@ -1392,7 +1443,10 @@ function manageFeedback(topBarH, stageIndex) {
   if (!feedbackStartMillis) feedbackStartMillis = millis();
 
   if (stageIndex >= 5) {
-    if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_6) {
+    if (
+      millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL &&
+      popups.length < MAX_POPUPS_STAGE_6
+    ) {
       let message = getNextFeedbackMessage(stageIndex);
       createAndAddPopup(message, topBarH, true);
       lastPopupSpawn = millis();
@@ -1514,11 +1568,7 @@ function drawPopup(popup) {
 }
 
 function drawBottomButton(container = null) {
-  let btnW = constrain(
-    round((container ? container.w : width) * 0.28),
-    120,
-    260,
-  );
+  let btnW = constrain(round((container ? container.w : width) * 0.28), 120, 260);
   let btnH = 46;
   let margin = 18;
 
@@ -1584,8 +1634,7 @@ function handleVerifyButtonClick() {
   verifyButtonMessageTime = millis();
 
   if (verifyButtonClicks === 1) verifyButtonMessage = "Please wait...";
-  else if (verifyButtonClicks === 2)
-    verifyButtonMessage = "Still processing...";
+  else if (verifyButtonClicks === 2) verifyButtonMessage = "Still processing...";
   else if (verifyButtonClicks === 3) verifyButtonMessage = "Do not click...";
   else if (verifyButtonClicks === 4) verifyButtonMessage = "STOP CLICKING";
   else if (verifyButtonClicks === 5) verifyButtonMessage = "I SAID WAIT";
@@ -1711,12 +1760,7 @@ function handlePointer(px, py) {
     if (showBlueErrorScreen) {
       if (errorInfoProgress >= 100 && restartBtnBox) {
         let rb = restartBtnBox;
-        if (
-          px >= rb.x &&
-          px <= rb.x + rb.w &&
-          py >= rb.y &&
-          py <= rb.y + rb.h
-        ) {
+        if (px >= rb.x && px <= rb.x + rb.w && py >= rb.y && py <= rb.y + rb.h) {
           playClickSfx();
           location.reload();
         }
@@ -1813,7 +1857,36 @@ function arraysEqual(a, b) {
   return true;
 }
 
-// blackout squares
+// ---------------------------
+// EFFECT HELPERS (ADDED)
+// ---------------------------
+
+// effect ids used by applyAndDrawEffect:
+// 1 scanlines, 2 noise, 3 pixelate, 4 blur
+function assignTileEffectsFromAllowed(allowedEffects) {
+  tileEffects = [];
+  tileSeeds = [];
+  for (let i = 0; i < gridCols * gridRows; i++) {
+    const pick = allowedEffects[floor(random(allowedEffects.length))];
+    tileEffects.push(pick);
+    tileSeeds.push(random(1000));
+  }
+}
+
+function setBlackoutCount(count) {
+  blackoutSquares = [];
+  const total = gridCols * gridRows;
+  const available = [];
+  for (let i = 0; i < total; i++) available.push(i);
+
+  while (blackoutSquares.length < count && available.length > 0) {
+    const j = floor(random(available.length));
+    blackoutSquares.push(available[j]);
+    available.splice(j, 1);
+  }
+}
+
+// blackout squares (legacy - no longer used by progression, kept for compatibility)
 function updateBlackoutSquares() {
   let count = floor(random(1, 4));
   blackoutSquares = [];
@@ -1828,7 +1901,7 @@ function updateBlackoutSquares() {
   }
 }
 
-// effects/filters
+// effects/filters (legacy - kept, but does NOT set blackouts anymore)
 function assignTileEffects() {
   tileEffects = [];
   tileSeeds = [];
@@ -1837,7 +1910,6 @@ function assignTileEffects() {
     tileEffects.push(pick);
     tileSeeds.push(random(1000));
   }
-  updateBlackoutSquares();
 }
 
 function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
@@ -1853,8 +1925,9 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     fill(0, 0, 0, alpha * 0.6);
     let spacing = lerp(12, 4, intensity);
     let offset = (millis() * 0.02 + seed) % spacing;
-    for (let y = dy + offset; y < dy + h; y += spacing)
+    for (let y = dy + offset; y < dy + h; y += spacing) {
       rect(dx, y, w, spacing * 0.35);
+    }
     pop();
     return;
   }
@@ -1892,11 +1965,7 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     if (intensity > 0.6) {
       g.loadPixels();
       for (let i = 0; i < g.pixels.length; i += 4) {
-        g.pixels[i] = constrain(
-          g.pixels[i] + random(-10, 10) * intensity,
-          0,
-          255,
-        );
+        g.pixels[i] = constrain(g.pixels[i] + random(-10, 10) * intensity, 0, 255);
         g.pixels[i + 1] = constrain(
           g.pixels[i + 1] + random(-10, 10) * intensity,
           0,
