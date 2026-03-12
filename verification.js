@@ -226,25 +226,34 @@ const FEEDBACK_BY_STAGE = [
     "Center your face in the frame.",
     "Remove anything covering your face.",
   ],
-  ["Stop moving.", "Try fixing your hair.", "Fix your posture."],
   [
-    "Is something wrong with your face?",
-    "I can't seem to verify you. You look strange from this angle.",
+    "Try smiling.", 
+    "Try fixing your hair.", 
+    "Fix your posture."
+  ],
+  [
+    "Unstable camera input. Stop moving.",
+    "Camera signal is degraded. Clean your lens and retry.",
     "You look tired. Open your eyes more.",
   ],
   [
     "You could at least try to look more presentable.",
-    "Are you okay? Your face seems weird.",
-    "Your expression seems off. You’d look better if you smiled.",
+    "Is something wrong with your face?",
+    "This is embarrassing. Just hold still.",
   ],
   [
-    "I told you to look at me. Why are you not looking at me?",
+    "I told you to look at me. WHY WON'T YOU LOOK AT ME?",
+    "You're not taking this seriously",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
     "Cannot process image data",
   ],
-  ["CRITICAL ERROR", "SYSTEM FAILURE IMMINENT", "SHUTTING DOWN"],
+  [
+    "CRITICAL ERROR", 
+    "SYSTEM FAILURE IMMINENT", 
+    "SHUTTING DOWN"
+  ],
 ];
 
 function setup() {
@@ -447,10 +456,6 @@ function draw() {
   );
   buffer.pop();
 
-  // ---------------------------------------------------------------------------
-  // EFFECTS (UPDATED progression + shorter chaos)
-  // ---------------------------------------------------------------------------
-
   // timing knobs (ms)
   const AUTO_SCRAMBLE_INTERVAL_NORMAL = 1200;
   const AUTO_SCRAMBLE_INTERVAL_CHAOS = 180;
@@ -519,8 +524,6 @@ function draw() {
       lastAutoScramble = millis();
     }
   }
-
-  // ---------------------------------------------------------------------------
 
   push();
   ui95BevelRect(
@@ -1414,7 +1417,7 @@ function refillFeedbackBag(stageIndex) {
   // clone pool
   let bag = pool.slice();
 
-  // Avoid immediate repeat across refills
+  // avoid immediate repeat across refills
   if (bag.length > 1 && lastFeedbackMessage) {
     bag = bag.filter((m) => m !== lastFeedbackMessage);
     // if filtering removed everything (pool was all same), fall back to full pool
@@ -1857,10 +1860,6 @@ function arraysEqual(a, b) {
   return true;
 }
 
-// ---------------------------
-// EFFECT HELPERS (ADDED)
-// ---------------------------
-
 // effect ids used by applyAndDrawEffect:
 // 1 scanlines, 2 noise, 3 pixelate, 4 blur
 function assignTileEffectsFromAllowed(allowedEffects) {
@@ -1886,7 +1885,7 @@ function setBlackoutCount(count) {
   }
 }
 
-// blackout squares (legacy - no longer used by progression, kept for compatibility)
+// blackout squares
 function updateBlackoutSquares() {
   let count = floor(random(1, 4));
   blackoutSquares = [];
@@ -1901,7 +1900,7 @@ function updateBlackoutSquares() {
   }
 }
 
-// effects/filters (legacy - kept, but does NOT set blackouts anymore)
+// effects/filters
 function assignTileEffects() {
   tileEffects = [];
   tileSeeds = [];
@@ -1913,7 +1912,7 @@ function assignTileEffects() {
 }
 
 function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
-  const pMax = 160;
+  const pMax = 96; 
   let pW = min(tileImg.width, pMax);
   let pH = min(tileImg.height, pMax);
 
