@@ -2,7 +2,7 @@ let capture;
 let started = false;
 
 // stage: 'wheel' | 'claim' | 'consent' | 'math' | 'camera'
-let stage = 'wheel';
+let stage = "wheel";
 
 // consent UI state
 let consentChecked = false;
@@ -16,7 +16,7 @@ const WHEEL_PRIZES = [
   "Try Again",
   "Bonus Spin",
   "Jackpot",
-  "Bonus Prize"
+  "Bonus Prize",
 ];
 
 let wheelAngle = 0;
@@ -36,6 +36,8 @@ let prizeWheelSfx = null;
 let prizeWheelSfxReady = false;
 let confettiSfx = null;
 let confettiSfxReady = false;
+let clickSfx = null;
+let clickSfxReady = false;
 
 // confetti effect
 let confetti = [];
@@ -43,10 +45,10 @@ let confettiPlaying = false;
 let confettiStartTime = 0;
 
 // math captcha state
-let mathProblem = { num1: 0, num2: 0, operator: '+', answer: 0 };
-let mathInput = null; 
-let mathSubmitBtn = null; 
-let mathMsg = ''; // feedback for wrong attempts
+let mathProblem = { num1: 0, num2: 0, operator: "+", answer: 0 };
+let mathInput = null;
+let mathSubmitBtn = null;
+let mathMsg = ""; // feedback for wrong attempts
 let mathAttempts = 0;
 
 const gridCols = 3;
@@ -57,10 +59,14 @@ let buffer = null;
 
 // feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 2000; // stage escalation
+const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
-let userInteracted = false; 
+let userInteracted = false;
+
+// feedback de-duplication
+let feedbackBags = {}; 
+let lastFeedbackMessage = ""; 
 
 // popup state
 let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn: {x,y,r} }
@@ -68,7 +74,7 @@ let popups = []; // array of popup objects: { message, box: {x,y,w,h}, closeBtn:
 // verify button state
 let verifyBtnBox = null;
 let verifyButtonClicks = 0;
-let verifyButtonMessage = 'verifying';
+let verifyButtonMessage = "verifying";
 let verifyButtonMessageTime = 0;
 const VERIFY_BUTTON_MESSAGE_DURATION = 2000;
 
@@ -76,7 +82,7 @@ const VERIFY_BUTTON_MESSAGE_DURATION = 2000;
 let showBlueErrorScreen = false;
 let errorInfoProgress = 0;
 let errorInfoStartTime = 0;
-const ERROR_INFO_DURATION = 12000; 
+const ERROR_INFO_DURATION = 12000;
 let restartBtnBox = null;
 
 // grid hit test info
@@ -91,7 +97,7 @@ const HIGHLIGHT_COLOR = [212, 246, 255, 120]; // RGBA
 // visual corruption effects (start at feedback stage 3, stronger at stage 4+)
 let effectsAssigned = false;
 let tileEffects = []; // length 9, values: 0 none, 1 scanlines, 2 noise, 3 pixelate, 4 blur
-let tileSeeds = []; 
+let tileSeeds = [];
 
 // blackout squares state
 let blackoutSquares = []; // array of indices that are blacked out
@@ -107,26 +113,26 @@ const MAX_POPUPS_STAGE_6 = 5;
 let lastPopupSpawn = 0;
 const POPUP_SPAWN_INTERVAL = 1200;
 
-const BLUE = '#1a73e8';
-const WHITE = '#ffffff';
-const TEXT_COLOR = '#ffffff';
-const BSOD_BLUE = '#0037DA';
+const BLUE = "#1a73e8";
+const WHITE = "#ffffff";
+const TEXT_COLOR = "#ffffff";
+const BSOD_BLUE = "#0037DA";
 
 // ui (windows 95/98 inspired)
 const UI95 = {
-  bg: '#C0C0C0',
-  panel: '#C0C0C0',
-  face: '#DFDFDF',
-  shadow: '#808080',
-  dark: '#404040',
-  highlight: '#FFFFFF',
-  text: '#000000',
-  title: '#000080',
-  titleText: '#FFFFFF'
+  bg: "#C0C0C0",
+  panel: "#C0C0C0",
+  face: "#DFDFDF",
+  shadow: "#808080",
+  dark: "#404040",
+  highlight: "#FFFFFF",
+  text: "#000000",
+  title: "#000080",
+  titleText: "#FFFFFF",
 };
 
 function ui95SetFont() {
-  textFont('MS Sans Serif, Tahoma, Verdana, Arial, sans-serif');
+  textFont("MS Sans Serif, Tahoma, Verdana, Arial, sans-serif");
 }
 
 function ui95BevelRect(x, y, w, h, inset = false) {
@@ -176,7 +182,7 @@ function ui95Button(box, label, pressed = false) {
   ui95SetFont();
 
   noStroke();
-  fill(pressed ? '#B0B0B0' : UI95.panel);
+  fill(pressed ? "#B0B0B0" : UI95.panel);
   rect(box.x, box.y, box.w, box.h);
 
   ui95BevelRect(box.x, box.y, box.w, box.h, pressed);
@@ -201,7 +207,7 @@ function ui95Panel(x, y, w, h, title) {
   ui95TitleBar(x + 2, y + 2, w - 4, titleH, title);
 
   noStroke();
-  fill('#EFEFEF');
+  fill("#EFEFEF");
   rect(x + 4, y + 2 + titleH + 2, w - 8, h - (titleH + 8));
   pop();
 
@@ -213,41 +219,38 @@ const FEEDBACK_BY_STAGE = [
   [
     "Please position your face inside the grid.",
     "Ensure proper lighting for verification.",
-    "Make sure your face is visible to the camera."
+    "Make sure your face is visible to the camera.",
   ],
   [
     "Move a little closer to the camera.",
     "Center your face in the frame.",
-    "Remove anything covering your face."
+    "Remove anything covering your face.",
   ],
   [
-    "Stop moving.",
-    "Try fixing your hair.",
-    "Fix your posture."
-  ],
+    "Stop moving.", 
+    "Try fixing your hair.", 
+    "Fix your posture."],
   [
     "Is something wrong with your face?",
     "I can't seem to verify you. You look strange from this angle.",
-    "You look tired. Open your eyes more."
+    "You look tired. Open your eyes more.",
   ],
   [
     "You could at least try to look more presentable.",
-    "Why do you look like that?",
-    "Your expression seems off. You’d look better if you smiled."
+    "Are you okay? Your face seems weird.",
+    "Your expression seems off. You’d look better if you smiled.",
   ],
   [
     "I told you to look at me. Why are you not looking at me?",
-    "Is something wrong with your face? Your face seems weird.",
     "Ȃ̶̭̲͍̈́̐r̴̝̤̖͗̒͒̄͒e̴̻͎̾̆ ̵̨̡͇̘̣̇̎̍̊̈́͠ÿ̴̛̩̗̟͈͚͊͜͠o̵̧͔͆̓̕u̷̖͕͚̾͌̇̂ ̵̯̇ḧ̶̯ǘ̸̢͎͇͉͉̔͌̌̈́m̵̨̻̖̫̱͜͝ä̸̠̹͍͓̣́̌͑ṇ̵͈͘?̸̧̢̖̪̦̀͐́̿͑̚",
     "ERROR: VERIFICATION FAILED",
     "SYSTEM MALFUNCTION DETECTED",
-    "Cannot process image data"
+    "Cannot process image data",
   ],
   [
-    "CRITICAL ERROR",
-    "SYSTEM FAILURE IMMINENT",
-    "SHUTTING DOWN"
-  ]
+    "CRITICAL ERROR", 
+    "SYSTEM FAILURE IMMINENT", 
+    "SHUTTING DOWN"],
 ];
 
 function setup() {
@@ -257,30 +260,31 @@ function setup() {
   noStroke();
   initPrizeWheelSfx();
   initConfettiSfx();
+  initClickSfx();
 }
 
 function draw() {
   background(255);
 
-  if (stage === 'wheel') {
+  if (stage === "wheel") {
     drawPrizeWheelUI();
     lastGridBox = null;
     return;
   }
 
-  if (stage === 'claim') {
+  if (stage === "claim") {
     drawClaimUI();
     lastGridBox = null;
     return;
   }
 
-  if (stage === 'consent') {
+  if (stage === "consent") {
     drawConsentUI();
     lastGridBox = null;
     return;
   }
 
-  if (stage === 'math') {
+  if (stage === "math") {
     drawMathCaptchaUI();
     lastGridBox = null;
     return;
@@ -289,23 +293,22 @@ function draw() {
   // camera stage
   ui95SetFont();
 
-  // Window frame sizing
+  // window frame sizing
   const VERIFY_BTN_H = 46;
   const VERIFY_BTN_MARGIN = 18;
-  const GRID_BTN_GAP = 12; // space between grid and button area
+  const GRID_BTN_GAP = 12;
 
-  // Window frame sizing (allow taller on mobile)
   const winW = min(width * 0.94, 920);
   const maxWinH = height * 0.94;
 
-  // Start with your current size, but allow it to grow if needed
-  let winH = min(height * 0.90, 760);
+  let winH = min(height * 0.9, 760);
 
-  // Guarantee enough room for: topbar + grid + button area (rough minimum)
   const minWinHNeeded =
-    (24 /*title*/ + 8 /*chrome*/ + 14 * 2 /*pad*/) +
-    (80 /*min topBarH*/) +
-    (220 /*min grid*/) +
+    24 +
+    8 +
+    14 * 2 +
+    80 +
+    220 +
     (GRID_BTN_GAP + VERIFY_BTN_H + VERIFY_BTN_MARGIN);
 
   winH = constrain(winH, minWinHNeeded, maxWinH);
@@ -341,16 +344,24 @@ function draw() {
   textStyle(NORMAL);
   let size1 = constrain(round(lineHeight * 0.45), 12, 20);
   textSize(size1);
-  text('Select all squares with', xText, contentY + topPadding + lineHeight * 0.5);
+  text(
+    "Select all squares with",
+    xText,
+    contentY + topPadding + lineHeight * 0.5,
+  );
 
   let size2 = constrain(round(lineHeight * 0.9), 20, 36);
   textSize(size2);
   textStyle(BOLD);
-  text('human', xText, contentY + topPadding + lineHeight * 1.5);
+  text("human", xText, contentY + topPadding + lineHeight * 1.5);
   textStyle(NORMAL);
 
   textSize(size1);
-  text('If there are any, continue', xText, contentY + topPadding + lineHeight * 2.5);
+  text(
+    "If there are any, continue",
+    xText,
+    contentY + topPadding + lineHeight * 2.5,
+  );
   pop();
 
   // feedback timing
@@ -366,7 +377,12 @@ function draw() {
     return;
   }
 
-  if (!capture || !capture.elt || !capture.elt.videoWidth || !capture.elt.videoHeight) {
+  if (
+    !capture ||
+    !capture.elt ||
+    !capture.elt.videoWidth ||
+    !capture.elt.videoHeight
+  ) {
     fill(0);
     noStroke();
     textAlign(CENTER, CENTER);
@@ -379,16 +395,16 @@ function draw() {
 
     lastGridBox = null;
     return;
-}
+  }
 
   // grid layout
   const reservedButtonAreaH = VERIFY_BTN_H + VERIFY_BTN_MARGIN + GRID_BTN_GAP;
   let availableH = contentH - topBarH - reservedButtonAreaH;
-  let squareSize = min(contentW * 0.98, availableH * 0.98)
+  let squareSize = min(contentW * 0.98, availableH * 0.98);
   squareSize = max(squareSize, 200);
 
   let xOffset = contentX + (contentW - squareSize) / 2;
-  let yOffset = contentY + topBarH + ((availableH - squareSize) / 2) + 8;
+  let yOffset = contentY + topBarH + (availableH - squareSize) / 2 + 8;
   let destCellSize = squareSize / gridCols;
 
   lastGridBox = { x: xOffset, y: yOffset, size: squareSize };
@@ -408,7 +424,17 @@ function draw() {
   buffer.push();
   buffer.clear();
   buffer.imageMode(CORNER);
-  buffer.image(capture, 0, 0, videoSize, videoSize, sx0, sy0, videoSize, videoSize);
+  buffer.image(
+    capture,
+    0,
+    0,
+    videoSize,
+    videoSize,
+    sx0,
+    sy0,
+    videoSize,
+    videoSize,
+  );
   buffer.pop();
 
   // effects
@@ -440,7 +466,13 @@ function draw() {
   }
 
   push();
-  ui95BevelRect(xOffset - 6, yOffset - 6, squareSize + 12, squareSize + 12, true);
+  ui95BevelRect(
+    xOffset - 6,
+    yOffset - 6,
+    squareSize + 12,
+    squareSize + 12,
+    true,
+  );
   pop();
 
   push();
@@ -470,8 +502,21 @@ function draw() {
       let dx = c * destCellSize;
       let dy = r * destCellSize;
 
-      if (effectsAssigned && tileEffects[destIndex] && tileEffects[destIndex] !== 0) {
-        applyAndDrawEffect(tile, tileEffects[destIndex], tileSeeds[destIndex], dx, dy, destCellSize, destCellSize, intensity);
+      if (
+        effectsAssigned &&
+        tileEffects[destIndex] &&
+        tileEffects[destIndex] !== 0
+      ) {
+        applyAndDrawEffect(
+          tile,
+          tileEffects[destIndex],
+          tileSeeds[destIndex],
+          dx,
+          dy,
+          destCellSize,
+          destCellSize,
+          intensity,
+        );
       } else {
         image(tile, dx, dy, destCellSize, destCellSize);
       }
@@ -487,12 +532,28 @@ function draw() {
       let c = highlightedCell % gridCols;
       push();
       noStroke();
-      fill(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3]);
-      rect(xOffset + c * destCellSize, yOffset + r * destCellSize, destCellSize, destCellSize);
+      fill(
+        HIGHLIGHT_COLOR[0],
+        HIGHLIGHT_COLOR[1],
+        HIGHLIGHT_COLOR[2],
+        HIGHLIGHT_COLOR[3],
+      );
+      rect(
+        xOffset + c * destCellSize,
+        yOffset + r * destCellSize,
+        destCellSize,
+        destCellSize,
+      );
       stroke(212, 246, 255);
       strokeWeight(3);
       noFill();
-      rect(xOffset + c * destCellSize + 2, yOffset + r * destCellSize + 2, destCellSize - 4, destCellSize - 4, 4);
+      rect(
+        xOffset + c * destCellSize + 2,
+        yOffset + r * destCellSize + 2,
+        destCellSize - 4,
+        destCellSize - 4,
+        4,
+      );
       pop();
     } else {
       highlightedCell = -1;
@@ -504,7 +565,12 @@ function draw() {
   noFill();
   for (let i = 0; i < gridCols; i++) {
     for (let j = 0; j < gridRows; j++) {
-      rect(xOffset + i * destCellSize, yOffset + j * destCellSize, destCellSize, destCellSize);
+      rect(
+        xOffset + i * destCellSize,
+        yOffset + j * destCellSize,
+        destCellSize,
+        destCellSize,
+      );
     }
   }
 
@@ -513,20 +579,46 @@ function draw() {
   if (userInteracted) manageFeedback(topBarH, stageIndex);
 }
 
+// click button sfx
+function initClickSfx() {
+  if (clickSfxReady) return;
+
+  clickSfx = createAudio('sounds/click.mp3');
+  clickSfxReady = true;
+
+  // keep it subtle
+  clickSfx.volume(0.7);
+
+  // iOS: prevent fullscreen audio UI
+  if (clickSfx.elt) {
+    clickSfx.elt.playsInline = true;
+    clickSfx.elt.preload = 'auto';
+  }
+}
+
+function playClickSfx() {
+  initClickSfx();
+  if (!clickSfx) return;
+
+  // restart cleanly for rapid taps
+  try { clickSfx.stop(); } catch (e) {}
+  clickSfx.time(0);
+  clickSfx.play();
+}
+
 // prize wheel sfx
 function initPrizeWheelSfx() {
   if (prizeWheelSfxReady) return;
 
-  prizeWheelSfx = createAudio('sounds/prizewheel.mp3');
+  prizeWheelSfx = createAudio("sounds/prizewheel.mp3");
   prizeWheelSfxReady = true;
 
-  // Optional: keep it subtle + consistent
+  // volume
   prizeWheelSfx.volume(0.6);
 
-  // Prevent iOS from auto-fullscreening audio UI
   if (prizeWheelSfx.elt) {
     prizeWheelSfx.elt.playsInline = true;
-    prizeWheelSfx.elt.preload = 'auto';
+    prizeWheelSfx.elt.preload = "auto";
   }
 }
 
@@ -535,7 +627,9 @@ function playPrizeWheelSfx() {
   if (!prizeWheelSfx) return;
 
   // restart sound cleanly on repeated spins
-  try { prizeWheelSfx.stop(); } catch (e) {}
+  try {
+    prizeWheelSfx.stop();
+  } catch (e) {}
   prizeWheelSfx.time(0);
   prizeWheelSfx.play();
 }
@@ -554,6 +648,7 @@ function startPrizeWheelSpin() {
   spinTurns = floor(random(4, 7));
 
   wheelSpinning = true;
+  playClickSfx();
   playPrizeWheelSfx();
 }
 
@@ -582,7 +677,7 @@ function drawPrizeWheelUI() {
   pop();
 
   const cx = panelX + panelW / 2;
-  const cy = panelY + panelH * 0.50;
+  const cy = panelY + panelH * 0.5;
   const radius = min(panelW, panelH) * 0.26;
 
   const wedges = WHEEL_PRIZES.length;
@@ -624,7 +719,7 @@ function drawPrizeWheelUI() {
     const mid = start + step / 2;
     rotate(mid);
 
-    const labelRadius = radius * 0.60;
+    const labelRadius = radius * 0.6;
     translate(labelRadius, 0);
 
     if (mid > HALF_PI && mid < 3 * HALF_PI) rotate(PI);
@@ -637,7 +732,7 @@ function drawPrizeWheelUI() {
     let fs = 12;
     textSize(fs);
 
-    const maxWidth = radius * 0.70;
+    const maxWidth = radius * 0.7;
     while (textWidth(label) > maxWidth && fs > 9) {
       fs--;
       textSize(fs);
@@ -648,7 +743,7 @@ function drawPrizeWheelUI() {
     pop();
   }
 
-  fill('#EFEFEF');
+  fill("#EFEFEF");
   circle(0, 0, radius * 0.28);
 
   fill(0);
@@ -659,7 +754,7 @@ function drawPrizeWheelUI() {
 
   pop();
 
-// wheel pointer
+  // wheel pointer
   push();
   fill(0);
   noStroke();
@@ -669,7 +764,7 @@ function drawPrizeWheelUI() {
     cx - 12,
     cy - radius - 18,
     cx + 12,
-    cy - radius - 18
+    cy - radius - 18,
   );
   pop();
 
@@ -682,17 +777,18 @@ function drawPrizeWheelUI() {
   ui95Button(spinBtnBox, wheelSpinning ? "SPINNING..." : "SPIN", false);
 }
 
+// confetti sfx
 function initConfettiSfx() {
   if (confettiSfxReady) return;
 
-  confettiSfx = createAudio('sounds/confetti.mp3');
+  confettiSfx = createAudio("sounds/confetti.mp3");
   confettiSfxReady = true;
 
   confettiSfx.volume(0.7);
 
   if (confettiSfx.elt) {
     confettiSfx.elt.playsInline = true;
-    confettiSfx.elt.preload = 'auto';
+    confettiSfx.elt.preload = "auto";
   }
 }
 
@@ -700,7 +796,9 @@ function playConfettiSfx() {
   initConfettiSfx();
   if (!confettiSfx) return;
 
-  try { confettiSfx.stop(); } catch (e) {}
+  try {
+    confettiSfx.stop();
+  } catch (e) {}
   confettiSfx.time(0);
   confettiSfx.play();
 }
@@ -721,7 +819,7 @@ function spawnConfetti() {
       size: random(6, 10),
       rot: random(TWO_PI),
       vr: random(-0.2, 0.2),
-      g: 0.08
+      g: 0.08,
     });
   }
 }
@@ -764,7 +862,7 @@ function drawClaimUI() {
   noSmooth();
 
   const w = constrain(round(min(width * 0.92, 560)), 320, 560);
-  const h = constrain(round(min(height * 0.60, 360)), 240, 360);
+  const h = constrain(round(min(height * 0.6, 360)), 240, 360);
   const x = (width - w) / 2;
   const y = (height - h) / 2;
 
@@ -789,7 +887,9 @@ function drawClaimUI() {
   textSize(12);
   text(
     "To prevent fraud and automated claims, verification is required before you can access your prize.",
-    x + 18, y + 70, w - 36
+    x + 18,
+    y + 70,
+    w - 36,
   );
   pop();
 
@@ -813,7 +913,11 @@ function startAndDrawBlueErrorScreen() {
   }
 
   let elapsedErr = millis() - errorInfoStartTime;
-  errorInfoProgress = constrain((elapsedErr / ERROR_INFO_DURATION) * 100, 0, 100);
+  errorInfoProgress = constrain(
+    (elapsedErr / ERROR_INFO_DURATION) * 100,
+    0,
+    100,
+  );
 
   drawBlueErrorScreenCentered(round(errorInfoProgress));
 }
@@ -829,7 +933,7 @@ function drawBlueErrorScreenCentered(progressPct) {
 
   // centered content block
   const panelW = min(width * 0.86, 820);
-  const panelH = min(height * 0.70, 520);
+  const panelH = min(height * 0.7, 520);
   const panelX = (width - panelW) / 2;
   const panelY = (height - panelH) / 2;
 
@@ -847,16 +951,16 @@ function drawBlueErrorScreenCentered(progressPct) {
 
   // fixed “slots” for each section (evenly spaced vertically)
   const faceY = lerp(topY, bottomY, 0.06);
-  const p1Y   = lerp(topY, bottomY, 0.26);
-  const p2Y   = lerp(topY, bottomY, 0.40);
-  const p3Y   = lerp(topY, bottomY, 0.54);
+  const p1Y = lerp(topY, bottomY, 0.26);
+  const p2Y = lerp(topY, bottomY, 0.4);
+  const p3Y = lerp(topY, bottomY, 0.54);
   const progY = lerp(topY, bottomY, 0.72);
-  const barY  = lerp(topY, bottomY, 0.82);
-  const btnY  = lerp(topY, bottomY, 0.90);
+  const barY = lerp(topY, bottomY, 0.82);
+  const btnY = lerp(topY, bottomY, 0.9);
 
   // font sizes scale with panel so it stays consistent across devices
   const faceSize = constrain(round(panelH * 0.09), 26, 44);
-  const bodySize = constrain(round(panelH * 0.040), 12, 20);
+  const bodySize = constrain(round(panelH * 0.04), 12, 20);
   const progSize = constrain(round(panelH * 0.048), 14, 24);
 
   fill(255);
@@ -867,13 +971,22 @@ function drawBlueErrorScreenCentered(progressPct) {
   textSize(faceSize);
   text(":( ", x, faceY);
 
-  // paragraphs (wrapped, but y positions are fixed so they won't overlap each other unless
-  // the text is too large for the slot — scaling above keeps it safe on mobile)
+  // paragraphs (set text wrapping and scale so it doesn't overlap on mobile)
   textStyle(NORMAL);
   textSize(bodySize);
-  text("Your system ran into a problem and couldn't complete verification.", x, p1Y, w);
+  text(
+    "Your system ran into a problem and couldn't complete verification.",
+    x,
+    p1Y,
+    w,
+  );
   text("The system was unable to verify that the user is human.", x, p2Y, w);
-  text("We're just collecting some error info, and then we'll restart for you.", x, p3Y, w);
+  text(
+    "We're just collecting some error info, and then we'll restart for you.",
+    x,
+    p3Y,
+    w,
+  );
 
   // progress
   textStyle(BOLD);
@@ -975,7 +1088,7 @@ function drawConsentUI() {
   } else {
     push();
     ui95BevelRect(btnX, btnY, btnW, btnH, false);
-    fill('#A0A0A0');
+    fill("#A0A0A0");
     textAlign(CENTER, CENTER);
     textStyle(BOLD);
     textSize(13);
@@ -987,57 +1100,57 @@ function drawConsentUI() {
 // math captcha ui
 function enterMathCaptcha() {
   generateMathProblem();
-  mathMsg = '';
+  mathMsg = "";
   mathAttempts = 0;
 
   if (!mathInput) {
-    mathInput = createInput('');
-    mathInput.attribute('placeholder', 'Answer');
-    mathInput.attribute('type', 'number');
+    mathInput = createInput("");
+    mathInput.attribute("placeholder", "Answer");
+    mathInput.attribute("type", "number");
 
-    mathInput.style('font-family', 'Tahoma, Verdana, Arial, sans-serif');
-    mathInput.style('font-size', '14px');
-    mathInput.style('padding', '8px 10px');
-    mathInput.style('border', '2px solid #808080');
-    mathInput.style('border-top-color', '#404040');
-    mathInput.style('border-left-color', '#404040');
-    mathInput.style('border-right-color', '#FFFFFF');
-    mathInput.style('border-bottom-color', '#FFFFFF');
-    mathInput.style('border-radius', '0px');
-    mathInput.style('background', '#FFFFFF');
-    mathInput.style('color', '#000000');
-    mathInput.style('z-index', '1000');
-    mathInput.style('position', 'absolute');
-    mathInput.style('box-sizing', 'border-box');
-    mathInput.elt.autocomplete = 'off';
+    mathInput.style("font-family", "Tahoma, Verdana, Arial, sans-serif");
+    mathInput.style("font-size", "14px");
+    mathInput.style("padding", "8px 10px");
+    mathInput.style("border", "2px solid #808080");
+    mathInput.style("border-top-color", "#404040");
+    mathInput.style("border-left-color", "#404040");
+    mathInput.style("border-right-color", "#FFFFFF");
+    mathInput.style("border-bottom-color", "#FFFFFF");
+    mathInput.style("border-radius", "0px");
+    mathInput.style("background", "#FFFFFF");
+    mathInput.style("color", "#000000");
+    mathInput.style("z-index", "1000");
+    mathInput.style("position", "absolute");
+    mathInput.style("box-sizing", "border-box");
+    mathInput.elt.autocomplete = "off";
   }
 
   if (!mathSubmitBtn) {
-    mathSubmitBtn = createButton('OK');
+    mathSubmitBtn = createButton("OK");
     mathSubmitBtn.mousePressed(handleMathSubmit);
     mathSubmitBtn.touchStarted(handleMathSubmit);
 
-    mathSubmitBtn.style('font-family', 'Tahoma, Verdana, Arial, sans-serif');
-    mathSubmitBtn.style('font-size', '14px');
-    mathSubmitBtn.style('font-weight', 'bold');
-    mathSubmitBtn.style('padding', '8px 14px');
-    mathSubmitBtn.style('border-radius', '0px');
-    mathSubmitBtn.style('border', '2px solid #C0C0C0');
-    mathSubmitBtn.style('border-top-color', '#FFFFFF');
-    mathSubmitBtn.style('border-left-color', '#FFFFFF');
-    mathSubmitBtn.style('border-right-color', '#808080');
-    mathSubmitBtn.style('border-bottom-color', '#808080');
-    mathSubmitBtn.style('background', '#C0C0C0');
-    mathSubmitBtn.style('color', '#000000');
-    mathSubmitBtn.style('cursor', 'pointer');
-    mathSubmitBtn.style('z-index', '1000');
-    mathSubmitBtn.style('position', 'absolute');
-    mathSubmitBtn.style('height', '40px');
-    mathSubmitBtn.style('box-sizing', 'border-box');
+    mathSubmitBtn.style("font-family", "Tahoma, Verdana, Arial, sans-serif");
+    mathSubmitBtn.style("font-size", "14px");
+    mathSubmitBtn.style("font-weight", "bold");
+    mathSubmitBtn.style("padding", "8px 14px");
+    mathSubmitBtn.style("border-radius", "0px");
+    mathSubmitBtn.style("border", "2px solid #C0C0C0");
+    mathSubmitBtn.style("border-top-color", "#FFFFFF");
+    mathSubmitBtn.style("border-left-color", "#FFFFFF");
+    mathSubmitBtn.style("border-right-color", "#808080");
+    mathSubmitBtn.style("border-bottom-color", "#808080");
+    mathSubmitBtn.style("background", "#C0C0C0");
+    mathSubmitBtn.style("color", "#000000");
+    mathSubmitBtn.style("cursor", "pointer");
+    mathSubmitBtn.style("z-index", "1000");
+    mathSubmitBtn.style("position", "absolute");
+    mathSubmitBtn.style("height", "40px");
+    mathSubmitBtn.style("box-sizing", "border-box");
   }
 
   positionMathElements();
-  mathInput.elt.value = '';
+  mathInput.elt.value = "";
 
   setTimeout(() => {
     if (mathInput && mathInput.elt) mathInput.elt.focus();
@@ -1045,14 +1158,14 @@ function enterMathCaptcha() {
 }
 
 function generateMathProblem() {
-  let operators = ['+', '-', '×'];
+  let operators = ["+", "-", "×"];
   mathProblem.operator = random(operators);
 
-  if (mathProblem.operator === '+') {
+  if (mathProblem.operator === "+") {
     mathProblem.num1 = floor(random(1, 20));
     mathProblem.num2 = floor(random(1, 20));
     mathProblem.answer = mathProblem.num1 + mathProblem.num2;
-  } else if (mathProblem.operator === '-') {
+  } else if (mathProblem.operator === "-") {
     mathProblem.num1 = floor(random(10, 30));
     mathProblem.num2 = floor(random(1, mathProblem.num1));
     mathProblem.answer = mathProblem.num1 - mathProblem.num2;
@@ -1081,14 +1194,23 @@ function positionMathElements() {
     mathInput.show();
   }
   if (mathSubmitBtn) {
-    mathSubmitBtn.position(x + 18 + inputWidth + gap, y + h - bottomMargin - elementHeight);
+    mathSubmitBtn.position(
+      x + 18 + inputWidth + gap,
+      y + h - bottomMargin - elementHeight,
+    );
     mathSubmitBtn.show();
   }
 }
 
 function removeMathElements() {
-  if (mathInput) { mathInput.remove(); mathInput = null; }
-  if (mathSubmitBtn) { mathSubmitBtn.remove(); mathSubmitBtn = null; }
+  if (mathInput) {
+    mathInput.remove();
+    mathInput = null;
+  }
+  if (mathSubmitBtn) {
+    mathSubmitBtn.remove();
+    mathSubmitBtn = null;
+  }
 }
 
 function drawMathCaptchaUI() {
@@ -1102,16 +1224,18 @@ function drawMathCaptchaUI() {
   const y = (height - h) / 2;
 
   ui95Panel(x, y, w, h, "Math Verification");
-
-  // ✅ Increase/decrease this to move the whole content block down/up
-  const yOffset = 24; // try 16, 24, 32, 40
+  const yOffset = 24;
 
   push();
   fill(40);
   textAlign(LEFT, TOP);
   textStyle(NORMAL);
   textSize(12);
-  text("This question is to prevent automated spam submissions", x + 18, y + 20 + yOffset);
+  text(
+    "This question is to prevent automated spam submissions",
+    x + 18,
+    y + 20 + yOffset,
+  );
   pop();
 
   push();
@@ -1154,6 +1278,7 @@ function drawMathCaptchaUI() {
 }
 
 function handleMathSubmit() {
+  playClickSfx();
   if (!mathInput) return false;
 
   let val = mathInput.elt.value.trim();
@@ -1161,18 +1286,21 @@ function handleMathSubmit() {
 
   if (isNaN(userAnswer)) {
     mathMsg = "Please enter a valid number.";
-    mathInput.elt.value = '';
+    mathInput.elt.value = "";
     mathInput.elt.focus();
     return false;
   }
 
   if (userAnswer === mathProblem.answer) {
     removeMathElements();
-    mathMsg = '';
-    stage = 'camera';
+    mathMsg = "";
+    stage = "camera";
     started = true;
     capture = createCapture({ audio: false, video: { facingMode: "user" } });
     capture.hide();
+
+    feedbackBags = {};
+    lastFeedbackMessage = "";
 
     feedbackStartMillis = millis();
     lastFeedbackAttempt = millis();
@@ -1188,13 +1316,13 @@ function handleMathSubmit() {
     restartBtnBox = null;
 
     verifyButtonClicks = 0;
-    verifyButtonMessage = 'verifying';
+    verifyButtonMessage = "verifying";
     verifyButtonMessageTime = 0;
   } else {
     mathAttempts++;
     mathMsg = "Incorrect answer. Try again.";
     generateMathProblem();
-    mathInput.elt.value = '';
+    mathInput.elt.value = "";
     setTimeout(() => {
       if (mathInput && mathInput.elt) mathInput.elt.focus();
     }, 100);
@@ -1218,16 +1346,46 @@ function drawTopBar(topBarH) {
   textStyle(NORMAL);
   let size1 = constrain(round(lineHeight * 0.45), 12, 20);
   textSize(size1);
-  text('Select all squares with', xText, topPadding + lineHeight * 0.5);
+  text("Select all squares with", xText, topPadding + lineHeight * 0.5);
 
   let size2 = constrain(round(lineHeight * 0.9), 20, 36);
   textSize(size2);
   textStyle(BOLD);
-  text('human', xText, topPadding + lineHeight * 1.5);
+  text("human", xText, topPadding + lineHeight * 1.5);
   textStyle(NORMAL);
 
   textSize(size1);
-  text('If there are any, continue', xText, topPadding + lineHeight * 2.5);
+  text("If there are any, continue", xText, topPadding + lineHeight * 2.5);
+}
+
+function refillFeedbackBag(stageIndex) {
+  const pool = FEEDBACK_BY_STAGE[stageIndex] || [];
+  // clone pool
+  let bag = pool.slice();
+
+  // Avoid immediate repeat across refills
+  if (bag.length > 1 && lastFeedbackMessage) {
+    bag = bag.filter(m => m !== lastFeedbackMessage);
+    // if filtering removed everything (pool was all same), fall back to full pool
+    if (bag.length === 0) bag = pool.slice();
+  }
+
+  // shuffle
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = floor(random(i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+
+  feedbackBags[stageIndex] = bag;
+}
+
+function getNextFeedbackMessage(stageIndex) {
+  if (!feedbackBags[stageIndex] || feedbackBags[stageIndex].length === 0) {
+    refillFeedbackBag(stageIndex);
+  }
+  const msg = feedbackBags[stageIndex].pop(); // pop from shuffled bag
+  lastFeedbackMessage = msg;
+  return msg;
 }
 
 function manageFeedback(topBarH, stageIndex) {
@@ -1235,15 +1393,13 @@ function manageFeedback(topBarH, stageIndex) {
 
   if (stageIndex >= 5) {
     if (millis() - lastPopupSpawn >= POPUP_SPAWN_INTERVAL && popups.length < MAX_POPUPS_STAGE_6) {
-      let pool = FEEDBACK_BY_STAGE[stageIndex];
-      let message = pool[floor(random(pool.length))];
+      let message = getNextFeedbackMessage(stageIndex);
       createAndAddPopup(message, topBarH, true);
       lastPopupSpawn = millis();
     }
   } else {
     if (popups.length === 0 && millis() - lastFeedbackAttempt >= FEEDBACK_CHANGE_MS) {
-      let pool = FEEDBACK_BY_STAGE[stageIndex];
-      let message = pool[floor(random(pool.length))];
+      let message = getNextFeedbackMessage(stageIndex);
       createAndAddPopup(message, topBarH, false);
       lastFeedbackAttempt = millis();
     }
@@ -1305,9 +1461,12 @@ function drawPopup(popup) {
   let tlX = x + 12;
   let tlY = y + chromeH / 2;
   noStroke();
-  fill('#ff5f57'); circle(tlX, tlY, r * 2);
-  fill('#ffbd2e'); circle(tlX + (r * 2 + gap), tlY, r * 2);
-  fill('#28c840'); circle(tlX + 2 * (r * 2 + gap), tlY, r * 2);
+  fill("#ff5f57");
+  circle(tlX, tlY, r * 2);
+  fill("#ffbd2e");
+  circle(tlX + (r * 2 + gap), tlY, r * 2);
+  fill("#28c840");
+  circle(tlX + 2 * (r * 2 + gap), tlY, r * 2);
   pop();
 
   push();
@@ -1323,8 +1482,18 @@ function drawPopup(popup) {
   circle(popup.closeBtn.x, popup.closeBtn.y, popup.closeBtn.r * 2);
   stroke(120);
   strokeWeight(2);
-  line(popup.closeBtn.x - 6, popup.closeBtn.y - 6, popup.closeBtn.x + 6, popup.closeBtn.y + 6);
-  line(popup.closeBtn.x - 6, popup.closeBtn.y + 6, popup.closeBtn.x + 6, popup.closeBtn.y - 6);
+  line(
+    popup.closeBtn.x - 6,
+    popup.closeBtn.y - 6,
+    popup.closeBtn.x + 6,
+    popup.closeBtn.y + 6,
+  );
+  line(
+    popup.closeBtn.x - 6,
+    popup.closeBtn.y + 6,
+    popup.closeBtn.x + 6,
+    popup.closeBtn.y - 6,
+  );
   noStroke();
   pop();
 
@@ -1345,7 +1514,11 @@ function drawPopup(popup) {
 }
 
 function drawBottomButton(container = null) {
-  let btnW = constrain(round((container ? container.w : width) * 0.28), 120, 260);
+  let btnW = constrain(
+    round((container ? container.w : width) * 0.28),
+    120,
+    260,
+  );
   let btnH = 46;
   let margin = 18;
 
@@ -1368,15 +1541,18 @@ function drawBottomButton(container = null) {
   noStroke();
   rect(x, y, btnW, btnH, 8);
 
-  let label = '';
+  let label = "";
   let currentTime = millis();
 
-  if (verifyButtonMessage !== 'verifying' && currentTime - verifyButtonMessageTime < VERIFY_BUTTON_MESSAGE_DURATION) {
+  if (
+    verifyButtonMessage !== "verifying" &&
+    currentTime - verifyButtonMessageTime < VERIFY_BUTTON_MESSAGE_DURATION
+  ) {
     label = verifyButtonMessage;
   } else {
-    if (verifyButtonMessage !== 'verifying') verifyButtonMessage = 'verifying';
-    let dotCount = ((floor(currentTime / 500) % 3) + 1);
-    label = 'verifying' + '.'.repeat(dotCount);
+    if (verifyButtonMessage !== "verifying") verifyButtonMessage = "verifying";
+    let dotCount = (floor(currentTime / 500) % 3) + 1;
+    label = "verifying" + ".".repeat(dotCount);
   }
 
   noStroke();
@@ -1397,7 +1573,7 @@ function drawBottomButton(container = null) {
   text(label, x + btnW / 2, y + btnH / 2);
   pop();
 
-  if (stage === 'camera') {
+  if (stage === "camera") {
     window.verifyBtnBox = { x, y, w: btnW, h: btnH };
   }
 }
@@ -1407,34 +1583,44 @@ function handleVerifyButtonClick() {
   verifyButtonClicks++;
   verifyButtonMessageTime = millis();
 
-  if (verifyButtonClicks === 1) verifyButtonMessage = 'Please wait...';
-  else if (verifyButtonClicks === 2) verifyButtonMessage = 'Still processing...';
-  else if (verifyButtonClicks === 3) verifyButtonMessage = 'Do not click...';
-  else if (verifyButtonClicks === 4) verifyButtonMessage = 'STOP CLICKING';
-  else if (verifyButtonClicks === 5) verifyButtonMessage = 'I SAID WAIT';
+  if (verifyButtonClicks === 1) verifyButtonMessage = "Please wait...";
+  else if (verifyButtonClicks === 2)
+    verifyButtonMessage = "Still processing...";
+  else if (verifyButtonClicks === 3) verifyButtonMessage = "Do not click...";
+  else if (verifyButtonClicks === 4) verifyButtonMessage = "STOP CLICKING";
+  else if (verifyButtonClicks === 5) verifyButtonMessage = "I SAID WAIT";
   else {
     let hostileMessages = [
-      'STOP IT',
-      'WHY ARE YOU DOING THIS',
-      'LEAVE ME ALONE',
-      'ERROR: USER IMPATIENT',
-      'PROCESSING INTERRUPTED',
-      'DO NOT TOUCH'
+      "STOP IT",
+      "WHY ARE YOU DOING THIS",
+      "LEAVE ME ALONE",
+      "ERROR: USER IMPATIENT",
+      "PROCESSING INTERRUPTED",
+      "DO NOT TOUCH",
     ];
     verifyButtonMessage = random(hostileMessages);
   }
 }
 
 // input & pointer handling
-function touchStarted() { return handlePointer(mouseX, mouseY); }
-function mousePressed() { return handlePointer(mouseX, mouseY); }
+function touchStarted() {
+  return handlePointer(mouseX, mouseY);
+}
+function mousePressed() {
+  return handlePointer(mouseX, mouseY);
+}
 
 function handlePointer(px, py) {
   // wheel stage
-  if (stage === 'wheel') {
-    if (!wheelSpinning && spinBtnBox &&
-        px >= spinBtnBox.x && px <= spinBtnBox.x + spinBtnBox.w &&
-        py >= spinBtnBox.y && py <= spinBtnBox.y + spinBtnBox.h) {
+  if (stage === "wheel") {
+    if (
+      !wheelSpinning &&
+      spinBtnBox &&
+      px >= spinBtnBox.x &&
+      px <= spinBtnBox.x + spinBtnBox.w &&
+      py >= spinBtnBox.y &&
+      py <= spinBtnBox.y + spinBtnBox.h
+    ) {
       startPrizeWheelSpin();
       wheelResultIndex = null;
       return false;
@@ -1443,12 +1629,16 @@ function handlePointer(px, py) {
   }
 
   // claim stage
-  if (stage === 'claim') {
-    if (claimBtnBox &&
-        px >= claimBtnBox.x && px <= claimBtnBox.x + claimBtnBox.w &&
-        py >= claimBtnBox.y && py <= claimBtnBox.y + claimBtnBox.h) {
-
-      stage = 'consent';
+  if (stage === "claim") {
+    if (
+      claimBtnBox &&
+      px >= claimBtnBox.x &&
+      px <= claimBtnBox.x + claimBtnBox.w &&
+      py >= claimBtnBox.y &&
+      py <= claimBtnBox.y + claimBtnBox.h
+    ) {
+      playClickSfx();
+      stage = "consent";
       consentChecked = false;
 
       popups = [];
@@ -1464,7 +1654,7 @@ function handlePointer(px, py) {
       if (mathInput || mathSubmitBtn) removeMathElements();
 
       verifyButtonClicks = 0;
-      verifyButtonMessage = 'verifying';
+      verifyButtonMessage = "verifying";
       verifyButtonMessageTime = 0;
 
       return false;
@@ -1473,22 +1663,39 @@ function handlePointer(px, py) {
   }
 
   // bot-check stage
-  if (stage === 'consent') {
-    if (consentBox && px >= consentBox.x && px <= consentBox.x + consentBox.size &&
-        py >= consentBox.y && py <= consentBox.y + consentBox.size) {
+  if (stage === "consent") {
+    if (
+      consentBox &&
+      px >= consentBox.x &&
+      px <= consentBox.x + consentBox.size &&
+      py >= consentBox.y &&
+      py <= consentBox.y + consentBox.size
+    ) {
+      playClickSfx();
       consentChecked = !consentChecked;
       return false;
     }
-    if (consentBox && px >= consentBox.x + consentBox.size + 8 &&
-        px <= consentBox.x + consentBox.size + 300 &&
-        py >= consentBox.y && py <= consentBox.y + consentBox.size) {
+    if (
+      consentBox &&
+      px >= consentBox.x + consentBox.size + 8 &&
+      px <= consentBox.x + consentBox.size + 300 &&
+      py >= consentBox.y &&
+      py <= consentBox.y + consentBox.size
+    ) {
+      playClickSfx();
       consentChecked = !consentChecked;
       return false;
     }
-    if (continueBtnBox && px >= continueBtnBox.x && px <= continueBtnBox.x + continueBtnBox.w &&
-        py >= continueBtnBox.y && py <= continueBtnBox.y + continueBtnBox.h) {
+    if (
+      continueBtnBox &&
+      px >= continueBtnBox.x &&
+      px <= continueBtnBox.x + continueBtnBox.w &&
+      py >= continueBtnBox.y &&
+      py <= continueBtnBox.y + continueBtnBox.h
+    ) {
+      playClickSfx();
       if (consentChecked) {
-        stage = 'math';
+        stage = "math";
         enterMathCaptcha();
       }
       return false;
@@ -1497,15 +1704,20 @@ function handlePointer(px, py) {
   }
 
   // math stage
-  if (stage === 'math') return false;
+  if (stage === "math") return false;
 
   // camera stage
-  if (stage === 'camera') {
+  if (stage === "camera") {
     if (showBlueErrorScreen) {
       if (errorInfoProgress >= 100 && restartBtnBox) {
         let rb = restartBtnBox;
-        if (px >= rb.x && px <= rb.x + rb.w &&
-            py >= rb.y && py <= rb.y + rb.h) {
+        if (
+          px >= rb.x &&
+          px <= rb.x + rb.w &&
+          py >= rb.y &&
+          py <= rb.y + rb.h
+        ) {
+          playClickSfx();
           location.reload();
         }
       }
@@ -1515,6 +1727,7 @@ function handlePointer(px, py) {
     if (window.verifyBtnBox) {
       let vb = window.verifyBtnBox;
       if (px >= vb.x && px <= vb.x + vb.w && py >= vb.y && py <= vb.y + vb.h) {
+        playClickSfx();
         handleVerifyButtonClick();
         return false;
       }
@@ -1533,16 +1746,23 @@ function handlePointer(px, py) {
 
     for (let i = popups.length - 1; i >= 0; i--) {
       let popup = popups[i];
-      if (px >= popup.box.x && px <= popup.box.x + popup.box.w &&
-          py >= popup.box.y && py <= popup.box.y + popup.box.h) {
+      if (
+        px >= popup.box.x &&
+        px <= popup.box.x + popup.box.w &&
+        py >= popup.box.y &&
+        py <= popup.box.y + popup.box.h
+      ) {
         return false;
       }
     }
 
     if (lastGridBox) {
-      if (px >= lastGridBox.x && px <= lastGridBox.x + lastGridBox.size &&
-          py >= lastGridBox.y && py <= lastGridBox.y + lastGridBox.size) {
-
+      if (
+        px >= lastGridBox.x &&
+        px <= lastGridBox.x + lastGridBox.size &&
+        py >= lastGridBox.y &&
+        py <= lastGridBox.y + lastGridBox.size
+      ) {
         if (!userInteracted) {
           userInteracted = true;
           feedbackStartMillis = millis();
@@ -1633,7 +1853,8 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     fill(0, 0, 0, alpha * 0.6);
     let spacing = lerp(12, 4, intensity);
     let offset = (millis() * 0.02 + seed) % spacing;
-    for (let y = dy + offset; y < dy + h; y += spacing) rect(dx, y, w, spacing * 0.35);
+    for (let y = dy + offset; y < dy + h; y += spacing)
+      rect(dx, y, w, spacing * 0.35);
     pop();
     return;
   }
@@ -1643,7 +1864,7 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     push();
     noStroke();
     let density = lerp(0.02, 0.12, intensity);
-    let count = floor(w * h * density / 400);
+    let count = floor((w * h * density) / 400);
     for (let i = 0; i < count; i++) {
       let nx = random(dx, dx + w);
       let ny = random(dy, dy + h);
@@ -1671,9 +1892,21 @@ function applyAndDrawEffect(tileImg, effect, seed, dx, dy, w, h, intensity) {
     if (intensity > 0.6) {
       g.loadPixels();
       for (let i = 0; i < g.pixels.length; i += 4) {
-        g.pixels[i] = constrain(g.pixels[i] + random(-10, 10) * intensity, 0, 255);
-        g.pixels[i + 1] = constrain(g.pixels[i + 1] + random(-10, 10) * intensity, 0, 255);
-        g.pixels[i + 2] = constrain(g.pixels[i + 2] + random(-10, 10) * intensity, 0, 255);
+        g.pixels[i] = constrain(
+          g.pixels[i] + random(-10, 10) * intensity,
+          0,
+          255,
+        );
+        g.pixels[i + 1] = constrain(
+          g.pixels[i + 1] + random(-10, 10) * intensity,
+          0,
+          255,
+        );
+        g.pixels[i + 2] = constrain(
+          g.pixels[i + 2] + random(-10, 10) * intensity,
+          0,
+          255,
+        );
       }
       g.updatePixels();
     }
