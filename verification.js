@@ -57,7 +57,7 @@ let buffer = null;
 
 // feedback timing & content
 let feedbackStartMillis = 0;
-const FEEDBACK_STAGE_DURATION_MS = 20000; // stage escalation
+const FEEDBACK_STAGE_DURATION_MS = 2000; // stage escalation
 const FEEDBACK_CHANGE_MS = 7000; // attempt to show a new popup
 let lastFeedbackAttempt = 0;
 let userInteracted = false; 
@@ -837,81 +837,66 @@ function drawBlueErrorScreenCentered(progressPct) {
   fill(0, 0, 0, 18);
   rect(panelX, panelY, panelW, panelH, 2);
 
-  // ✅ Key fix: make padding + font sizes respond to the panel size,
-  // so the content expands to "use" the box on large screens but still fits on mobile.
+  // padding + content rect
   const pad = constrain(round(panelW * 0.04), 14, 34);
   const x = panelX + pad;
-  let y = panelY + pad;
-  const maxW = panelW - pad * 2;
+  const w = panelW - pad * 2;
 
-  // Scale typography off the panel height (not device category)
+  const topY = panelY + pad;
+  const bottomY = panelY + panelH - pad;
+
+  // fixed “slots” for each section (evenly spaced vertically)
+  const faceY = lerp(topY, bottomY, 0.06);
+  const p1Y   = lerp(topY, bottomY, 0.26);
+  const p2Y   = lerp(topY, bottomY, 0.40);
+  const p3Y   = lerp(topY, bottomY, 0.54);
+  const progY = lerp(topY, bottomY, 0.72);
+  const barY  = lerp(topY, bottomY, 0.82);
+  const btnY  = lerp(topY, bottomY, 0.90);
+
+  // font sizes scale with panel so it stays consistent across devices
   const faceSize = constrain(round(panelH * 0.09), 26, 44);
-  const bodySize = constrain(round(panelH * 0.042), 13, 22);
-  const progressSize = constrain(round(panelH * 0.048), 14, 24);
-
-  // Spacing derived from sizes so it stretches with the box
-  const afterFaceGap = round(faceSize * 0.55);
-  const paraGap = round(bodySize * 0.95);     // gap after each paragraph block
-  const sectionGap = round(bodySize * 0.55);  // extra padding between sections
+  const bodySize = constrain(round(panelH * 0.040), 12, 20);
+  const progSize = constrain(round(panelH * 0.048), 14, 24);
 
   fill(255);
   textAlign(LEFT, TOP);
 
-  // header face
+  // face
   textStyle(BOLD);
   textSize(faceSize);
-  text(":( ", x, y);
+  text(":( ", x, faceY);
 
-  y += faceSize + afterFaceGap;
-
-  // body paragraphs (wrap within maxW)
+  // paragraphs (wrapped, but y positions are fixed so they won't overlap each other unless
+  // the text is too large for the slot — scaling above keeps it safe on mobile)
   textStyle(NORMAL);
   textSize(bodySize);
-
-  text(
-    "Your system ran into a problem and couldn't complete verification.",
-    x, y, maxW
-  );
-  y += paraGap + sectionGap;
-
-  text(
-    "The system was unable to verify that the user is human.",
-    x, y, maxW
-  );
-  y += paraGap + sectionGap;
-
-  text(
-    "We're just collecting some error info, and then we'll restart for you.",
-    x, y, maxW
-  );
+  text("Your system ran into a problem and couldn't complete verification.", x, p1Y, w);
+  text("The system was unable to verify that the user is human.", x, p2Y, w);
+  text("We're just collecting some error info, and then we'll restart for you.", x, p3Y, w);
 
   // progress
-  y += paraGap + sectionGap;
   textStyle(BOLD);
-  textSize(progressSize);
-  text(`${progressPct}% complete`, x, y);
+  textSize(progSize);
+  text(`${progressPct}% complete`, x, progY);
 
   // bar
-  y += round(progressSize * 1.35);
-  const barW = min(maxW, round(panelW * 0.72));
+  const barW = min(w, round(panelW * 0.72));
   const barH = constrain(round(panelH * 0.02), 8, 14);
 
   noStroke();
   fill(255, 255, 255, 55);
-  rect(x, y, barW, barH);
+  rect(x, barY, barW, barH);
 
   fill(255);
-  rect(x, y, (barW * progressPct) / 100, barH);
+  rect(x, barY, (barW * progressPct) / 100, barH);
 
   // restart button (when complete)
   restartBtnBox = null;
   if (progressPct >= 100) {
-    y += round(panelH * 0.10); // bigger "bottom section" so it doesn't look cramped
-
     const btnW = constrain(round(panelW * 0.34), 170, 260);
     const btnH = constrain(round(panelH * 0.085), 38, 52);
     const btnX = x;
-    const btnY = y;
 
     restartBtnBox = { x: btnX, y: btnY, w: btnW, h: btnH };
 
